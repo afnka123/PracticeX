@@ -1,0 +1,7 @@
+server/.venv/
+server/.env
+server/reports.jsonl
+__pycache__/
+brand/
+.DS_Store
+*.pyc

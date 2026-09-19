@@ -1,0 +1,26 @@
+:root {
+  /* Core */
+  --studyx-slate: #1E2A38;       /* ground, icon disc, popup background */
+  --studyx-slate-raised: #26364A;/* cards on slate */
+  --studyx-slate-line: #3C4C60;  /* borders, dividers on slate */
+  --studyx-coral: #FF7A4D;       /* pencil, the X, primary action — DARK grounds only */
+  --studyx-coral-deep: #D2542A;  /* coral on light grounds, links */
+  --studyx-bone: #F2F0EA;        /* ruler, wordmark on dark, light surfaces */
+  --studyx-cloud: #5A6E86;       /* thought bubble — never text */
+  --studyx-peach: #FFD9C2;       /* ferrule + pencil cone, accent only */
+  --studyx-mist: #8FA0B4;        /* secondary text on slate, disabled */
+  --studyx-fog: #D6DEE8;         /* body copy on slate */
+  --studyx-paper: #EFECE6;       /* light page ground */
+  --studyx-ink: #2B3A4A;         /* body copy on light */
+
+  /* Type */
+  --studyx-font-text: 'Literata', Georgia, serif;
+  --studyx-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --studyx-wordmark-weight: 700;
+  --studyx-wordmark-tracking: 0.01em;
+
+  /* Radius / spacing used in the popup mock */
+  --studyx-radius-card: 12px;
+  --studyx-radius-button: 9px;
+  --studyx-radius-panel: 16px;
+}

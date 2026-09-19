@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StudyX</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&family=JetBrains+Mono:wght@400;500&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="panel.css">
+  <script src="mathjax-config.js"></script>
+  <script src="vendor/mathjax/tex-svg-full.js" defer></script>
+</head>
+<body>
+  <main class="panel">
+    <header class="head">
+      <img class="mark" src="logo/icon.svg" width="28" height="28" alt="">
+      <span class="wordmark">Study<span class="x">X</span></span>
+      <span class="counter" id="counter" title="Left this hour"></span>
+      <div class="head-tools">
+        <button class="icon-btn" id="open-history" title="Your progress" aria-label="Your progress">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 16.5V11M8 16.5V7M12 16.5v-6M16 16.5V3.5"/></svg>
+        </button>
+        <button class="icon-btn" id="toggle-focus" title="Focus mode" aria-label="Focus mode">
+          <svg class="enter" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" d="M3 7.5V3h4.5M12.5 3H17v4.5M17 12.5V17h-4.5M7.5 17H3v-4.5"/></svg>
+          <svg class="exit" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" d="M7.5 3v4.5H3M17 7.5h-4.5V3M12.5 17v-4.5H17M3 12.5h4.5V17"/></svg>
+        </button>
+        <button class="icon-btn" id="open-settings" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M11.3 1.5l.4 2.1c.5.2 1 .5 1.4.8l2-.7 1.3 2.2-1.6 1.4c.1.5.1 1.1 0 1.6l1.6 1.4-1.3 2.2-2-.7c-.4.3-.9.6-1.4.8l-.4 2.1H8.7l-.4-2.1c-.5-.2-1-.5-1.4-.8l-2 .7-1.3-2.2 1.6-1.4a4.6 4.6 0 010-1.6L3.6 5.9l1.3-2.2 2 .7c.4-.3.9-.6 1.4-.8l.4-2.1h2.6zM10 7a3 3 0 100 6 3 3 0 000-6z" transform="translate(0 1.5)"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <p class="notice" id="notice" hidden></p>
+
+    <!-- Start -->
+    <section class="view" id="view-start" hidden>
+      <div class="card">
+        <span class="label">Practice, generated</span>
+        <p class="body">Open a page with a math problem on it. StudyX reads it and writes new problems of the same type. Try each one first, then reveal.</p>
+      </div>
+      <div class="controls">
+        <div class="field">
+          <span class="label">Difficulty</span>
+          <div class="segmented" id="difficulty" role="radiogroup">
+            <button role="radio" data-value="easier">Easier</button>
+            <button role="radio" data-value="same">Same</button>
+            <button role="radio" data-value="harder">Harder</button>
+          </div>
+        </div>
+        <div class="field count-field" id="count-field">
+          <div class="row-label">
+            <span class="label">Problems</span>
+            <span class="count-readout mono" id="count-readout">3</span>
+          </div>
+          <div class="count" id="count-wrap">
+            <div class="wedge"><div class="wedge-fill"></div></div>
+            <input type="range" id="count" min="1" max="5" step="1" aria-label="Number of problems">
+          </div>
+          <div class="count-ticks" id="count-ticks" aria-hidden="true">
+            <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+          </div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="generate">Generate</button>
+      </div>
+      <div class="recent" id="recent" hidden>
+        <div class="row-label">
+          <span class="label">Recent practice</span>
+          <button class="link mono" id="recent-all">See progress</button>
+        </div>
+        <ul class="sets" id="recent-sets"></ul>
+      </div>
+    </section>
+
+    <!-- Crop -->
+    <section class="view" id="view-crop" hidden>
+      <span class="label">Select the problem</span>
+      <div class="crop" id="crop">
+        <img id="shot" alt="Screenshot of the current page">
+        <div class="crop-box" id="crop-box" hidden></div>
+      </div>
+      <div class="crop-bar">
+        <p class="hint">Drag over the problem so only that part is sent. Names and other details outside the box stay on this device.</p>
+        <div class="actions">
+          <button class="btn primary" id="send-crop">Generate</button>
+          <button class="btn secondary" id="send-whole">Use whole page</button>
+        </div>
+        <button class="link" id="cancel-crop">Cancel</button>
+      </div>
+    </section>
+
+    <!-- Waiting for the crop window -->
+    <section class="view" id="view-waiting" hidden>
+      <div class="card">
+        <span class="label">Select the problem</span>
+        <p class="body">Drag over the problem in the StudyX window that just opened, then press Generate.</p>
+      </div>
+      <button class="link" id="cancel-waiting">Cancel</button>
+    </section>
+
+    <!-- Problem -->
+    <section class="view" id="view-problem" hidden>
+      <div class="q-head">
+        <div class="row-label">
+          <span class="label" id="q-label"></span>
+          <span class="label topic" id="q-topic"></span>
+        </div>
+        <div class="progress" id="q-progress" role="group" aria-label="Questions in this set"></div>
+      </div>
+      <div class="card question-card">
+        <div class="typing" id="typing" hidden><span class="label" id="typing-label">Reading the problem</span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+        <div class="content question" id="question"></div>
+        <button class="diagram-btn" id="diagram-toggle" hidden>
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 17V3M3 17h14M5.5 13.5l4-5 3 2.5 4-6"/></svg>
+          <span id="diagram-toggle-label">View diagram</span>
+        </button>
+        <div class="diagram-wrap" id="diagram" hidden></div>
+      </div>
+
+      <div class="field" id="attempt-field">
+        <label class="label" for="attempt">Your answer</label>
+        <div class="attempt-box" id="attempt-box">
+          <input class="input mono" id="attempt" autocomplete="off" spellcheck="false" placeholder="Type it to check, or just view the answer.">
+        </div>
+        <div class="check-result" id="check-result" hidden>
+          <span class="label verdict" id="check-verdict"></span>
+          <div class="content" id="check-feedback"></div>
+        </div>
+      </div>
+
+      <div class="reveal" id="reveal" hidden>
+        <div class="row-label">
+          <span class="label">Answer</span>
+          <span class="label match" id="match" hidden>Matches yours</span>
+        </div>
+        <div class="content answer" id="answer"></div>
+
+        <div class="work" id="work" hidden>
+          <section class="work-part">
+            <span class="label">Approach</span>
+            <div class="content" id="approach"></div>
+          </section>
+          <section class="work-part">
+            <div class="row-label">
+              <span class="label">Working</span>
+              <button class="link mono" id="toggle-steps">Open all</button>
+            </div>
+            <ol class="steps" id="steps"></ol>
+          </section>
+          <section class="work-part">
+            <span class="label">Check</span>
+            <div class="content" id="check"></div>
+          </section>
+          <section class="work-part mistake">
+            <span class="label">Common mistake</span>
+            <div class="content" id="mistake"></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="actions" id="problem-actions"></div>
+      <p class="stream-status label" id="stream-status" hidden></p>
+
+      <button class="help-card" id="open-prereq">
+        <span class="help-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M9 18h6M10 21h4M12 3a6 6 0 00-3.6 10.8c.6.5 1 1.2 1.1 2V16h5v-.2c.1-.8.5-1.5 1.1-2A6 6 0 0012 3z"/></svg>
+        </span>
+        <span class="help-text">
+          <span class="help-title">Struggling? Get the prerequisite</span>
+          <span class="help-sub">The skills this question builds on, explained at your verbosity setting.</span>
+        </span>
+        <svg class="help-arrow" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+
+      <div class="more-card" id="more-card">
+        <span class="label">More like these</span>
+        <div class="more-options" id="more-options">
+          <button class="btn secondary" data-value="easier">Easier</button>
+          <button class="btn secondary" data-value="same">Same level</button>
+          <button class="btn secondary" data-value="harder">Harder</button>
+        </div>
+      </div>
+
+      <div class="report-row">
+        <button class="link mono" id="start-over">Start over</button>
+        <button class="link mono" id="open-report">Report a problem</button>
+      </div>
+      <div class="report" id="report" hidden>
+        <span class="label">What is wrong with it</span>
+        <div class="chips" id="report-reasons">
+          <button data-reason="question">Question is broken</button>
+          <button data-reason="answer">Answer is wrong</button>
+          <button data-reason="work">Work is wrong</button>
+          <button data-reason="diagram">Diagram is wrong</button>
+          <button data-reason="off-topic">Not the same type</button>
+        </div>
+      </div>
+
+      <nav class="nav-bar" aria-label="Problem set">
+        <button class="nav-btn" id="prev">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M12.5 4.5L7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Previous</span>
+        </button>
+        <button class="nav-btn" id="new-set">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 014.5 6h2l1.2-2h4.6l1.2 2h2A1.5 1.5 0 0117 7.5v7a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 14.5z M10 13.2a2.7 2.7 0 100-5.4 2.7 2.7 0 000 5.4z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span>New screenshot</span>
+        </button>
+        <button class="nav-btn" id="next">
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M7.5 4.5L13 10l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Next</span>
+        </button>
+      </nav>
+    </section>
+
+    <!-- Prerequisite -->
+    <section class="view" id="view-prereq" hidden>
+      <span class="label" id="prereq-label">Before this</span>
+      <div class="content" id="prereq-summary"></div>
+      <div id="prereq-list" class="prereq-list"></div>
+      <div id="prereq-videos-wrap">
+        <span class="label">Lessons</span>
+        <ul class="videos" id="prereq-videos"></ul>
+      </div>
+      <div class="actions">
+        <button class="btn secondary" id="prereq-back">Back to the question</button>
+      </div>
+    </section>
+
+    <!-- Progress and history -->
+    <section class="view" id="view-history" hidden>
+      <span class="label">Your progress</span>
+      <div class="stats">
+        <div class="stat" title="Answers marked correct by Check answer">
+          <span class="stat-num mono" id="stat-solved">0</span>
+          <span class="label">Solved</span>
+        </div>
+        <div class="stat" title="Of the answers you looked at, how many you got right first">
+          <span class="stat-num mono" id="stat-accuracy">–</span>
+          <span class="label">Accuracy</span>
+        </div>
+        <div class="stat" title="Days in a row you have practised">
+          <span class="stat-num mono" id="stat-streak">0</span>
+          <span class="label">Day streak</span>
+        </div>
+      </div>
+      <p class="hint" id="history-empty">Sets you generate show up here, with how many you got right. Nothing leaves this device.</p>
+      <div class="history-part" id="topics-wrap">
+        <span class="label">Topics</span>
+        <ul class="topics" id="topics"></ul>
+      </div>
+      <div class="history-part" id="sets-wrap">
+        <span class="label">Recent sets</span>
+        <ul class="sets" id="sets"></ul>
+      </div>
+      <div class="actions">
+        <button class="btn secondary" id="history-back">Back</button>
+      </div>
+      <button class="link mono" id="clear-history">Clear history</button>
+    </section>
+
+    <!-- Settings -->
+    <section class="view" id="view-settings" hidden>
+      <span class="label">Settings</span>
+
+      <div class="card settings-group">
+        <div class="field">
+          <div class="row-label">
+            <span class="label">Text size</span>
+            <span class="meta mono" id="text-size-value"></span>
+          </div>
+          <div class="size-row">
+            <span class="size-a small" aria-hidden="true">A</span>
+            <input type="range" class="size-slider" id="text-size" min="0.85" max="1.8" step="0.05" aria-label="Text size">
+            <span class="size-a large" aria-hidden="true">A</span>
+          </div>
+          <div class="content size-sample" id="size-sample"></div>
+        </div>
+
+        <div class="field">
+          <span class="label">Verbosity</span>
+          <div class="segmented" id="verbosity" role="radiogroup" aria-label="Verbosity">
+            <button role="radio" data-value="brief">Brief</button>
+            <button role="radio" data-value="standard">Standard</button>
+            <button role="radio" data-value="detailed">Detailed</button>
+          </div>
+          <p class="hint" id="verbosity-hint"></p>
+        </div>
+      </div>
+
+      <div class="card settings-group" id="dev-settings" hidden>
+        <span class="label">Developer</span>
+        <label class="field">
+          <span class="label">Model</span>
+          <select id="model" class="select"></select>
+        </label>
+        <label class="field">
+          <span class="label">Server</span>
+          <input class="input mono" id="server-url" spellcheck="false" placeholder="http://localhost:8787">
+        </label>
+        <label class="field">
+          <span class="label">Founder token</span>
+          <input class="input mono" id="founder-token" type="password" spellcheck="false" placeholder="Leave empty for the public tier">
+        </label>
+        <p class="hint">Only shown in unpacked builds.</p>
+      </div>
+
+      <div class="card settings-group">
+        <p class="hint">Screenshots go to the StudyX server and on to the selected model provider. StudyX does not keep them; the provider's own retention policy applies. Reports keep the generated question, not the screenshot.</p>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="save-settings">Done</button>
+      </div>
+      <span class="meta mono" id="settings-status"></span>
+    </section>
+  </main>
+  <script src="panel.js" type="module"></script>
+</body>
+</html>
