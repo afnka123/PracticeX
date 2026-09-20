@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>StudyX</title>
+  <title>PracticeX</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&family=JetBrains+Mono:wght@400;500&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
@@ -16,8 +16,7 @@
   <main class="panel">
     <header class="head">
       <img class="mark" src="logo/icon.svg" width="28" height="28" alt="">
-      <span class="wordmark">Study<span class="x">X</span></span>
-      <span class="counter" id="counter" title="Left this hour"></span>
+      <span class="wordmark">Practice<span class="x">X</span></span>
       <div class="head-tools">
         <button class="icon-btn" id="open-history" title="Your progress" aria-label="Your progress">
           <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 16.5V11M8 16.5V7M12 16.5v-6M16 16.5V3.5"/></svg>
@@ -32,39 +31,94 @@
       </div>
     </header>
 
+    <p class="usage" id="usage" hidden><span id="usage-main"></span></p>
+
     <p class="notice" id="notice" hidden></p>
 
     <!-- Start -->
     <section class="view" id="view-start" hidden>
-      <div class="card">
-        <span class="label">Practice, generated</span>
-        <p class="body">Open a page with a math problem on it. StudyX reads it and writes new problems of the same type. Try each one first, then reveal.</p>
-      </div>
+      <p class="lede">Screenshot a question, get new practice problems like it.</p>
       <div class="controls">
-        <div class="field">
-          <span class="label">Difficulty</span>
-          <div class="segmented" id="difficulty" role="radiogroup">
-            <button role="radio" data-value="easier">Easier</button>
-            <button role="radio" data-value="same">Same</button>
-            <button role="radio" data-value="harder">Harder</button>
-          </div>
-        </div>
-        <div class="field count-field" id="count-field">
+        <div class="field" id="class-field">
           <div class="row-label">
-            <span class="label">Problems</span>
-            <span class="count-readout mono" id="count-readout">3</span>
+            <span class="label">Class</span>
+            <button class="link mono" id="edit-classes" hidden>Edit</button>
           </div>
-          <div class="count" id="count-wrap">
-            <div class="wedge"><div class="wedge-fill"></div></div>
-            <input type="range" id="count" min="1" max="5" step="1" aria-label="Number of problems">
+          <div class="chips classes" id="classes" role="radiogroup" aria-label="Class"></div>
+          <form class="add-class" id="add-class" hidden>
+            <input class="input" id="class-name" maxlength="40" placeholder="Class name" aria-label="Class name">
+            <div class="add-class-row">
+              <select class="select" id="class-subject" aria-label="Subject"></select>
+              <button class="btn secondary" id="save-class" type="submit">Add</button>
+              <button class="link mono" id="cancel-class" type="button">Cancel</button>
+            </div>
+          </form>
+          <p class="hint" id="class-hint"></p>
+        </div>
+        <div class="field slider-field" id="slider-field">
+          <div class="row-label">
+            <select class="slider-pick" id="slider-pick" aria-label="What the slider sets">
+              <option value="count">Problems</option>
+              <option value="difficulty">Difficulty</option>
+              <option value="answers">Answer type</option>
+              <option value="verbosity">Explanation</option>
+            </select>
+            <span class="readout-stack">
+              <span class="count-readout mono" id="count-readout">3</span>
+              <span class="diff-readout" id="diff-readout">Medium</span>
+              <span class="ans-readout" id="ans-readout">Written</span>
+            </span>
           </div>
-          <div class="count-ticks" id="count-ticks" aria-hidden="true">
-            <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+          <div class="slider-stack">
+            <div class="slider-body" id="count-body">
+              <div class="count" id="count-wrap">
+                <div class="wedge"><div class="wedge-fill"></div></div>
+                <input type="range" id="count" min="1" max="5" step="1" aria-label="Number of problems">
+              </div>
+              <div class="count-ticks" id="count-ticks" aria-hidden="true">
+                <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+              </div>
+            </div>
+            <div class="slider-body" id="diff-body">
+              <div class="diff" id="diff-wrap">
+                <div class="diff-track" aria-hidden="true"></div>
+                <input type="range" id="difficulty" min="0" max="100" step="1" aria-label="Difficulty">
+              </div>
+              <div class="diff-ticks" id="diff-ticks" aria-hidden="true">
+                <span>Easy</span><span>Medium</span><span>Hard</span>
+              </div>
+            </div>
+            <div class="slider-body" id="ans-body">
+              <div class="ans" id="ans-wrap">
+                <div class="ans-rail" aria-hidden="true"><div class="ans-fill"></div><div class="ans-notch"></div></div>
+                <input type="range" id="answer-mix" min="0" max="100" step="1" aria-label="Answer style">
+              </div>
+              <div class="ans-ticks" id="ans-ticks" aria-hidden="true">
+                <span>Choices</span><span>Either</span><span>Written</span>
+              </div>
+              <p class="slider-hint">Set the answer format by preference.
+                <span class="slider-note">*Select Either if you have no preference between multiple-choice and free-response questions.</span>
+              </p>
+            </div>
+            <div class="slider-body" id="verb-body">
+              <div class="segmented" id="verbosity" role="radiogroup" aria-label="Verbosity">
+                <button role="radio" data-value="brief">Brief</button>
+                <button role="radio" data-value="standard">Standard</button>
+                <button role="radio" data-value="detailed">Detailed</button>
+              </div>
+              <p class="slider-hint" id="verbosity-hint"></p>
+            </div>
+          </div>
+          <div class="current-settings" id="current-settings">
+            <div class="cs-cell"><span class="cs-key">Difficulty</span><span class="cs-val" id="cs-difficulty">Medium</span></div>
+            <div class="cs-cell"><span class="cs-key">Problem #</span><span class="cs-val mono" id="cs-count">3</span></div>
+            <div class="cs-cell"><span class="cs-key">Answer type</span><span class="cs-val" id="cs-answers">Written</span></div>
+            <div class="cs-cell"><span class="cs-key">Explanation</span><span class="cs-val" id="cs-verbosity">Standard</span></div>
           </div>
         </div>
       </div>
       <div class="actions">
-        <button class="btn primary" id="generate">Generate</button>
+        <button class="btn primary" id="generate">Screenshot</button>
       </div>
       <div class="recent" id="recent" hidden>
         <div class="row-label">
@@ -83,7 +137,7 @@
         <div class="crop-box" id="crop-box" hidden></div>
       </div>
       <div class="crop-bar">
-        <p class="hint">Drag over the problem so only that part is sent. Names and other details outside the box stay on this device.</p>
+        <p class="hint">Only the box you drag is sent.</p>
         <div class="actions">
           <button class="btn primary" id="send-crop">Generate</button>
           <button class="btn secondary" id="send-whole">Use whole page</button>
@@ -96,7 +150,7 @@
     <section class="view" id="view-waiting" hidden>
       <div class="card">
         <span class="label">Select the problem</span>
-        <p class="body">Drag over the problem in the StudyX window that just opened, then press Generate.</p>
+        <p class="body">Drag over the problem in the window that just opened, then press Generate.</p>
       </div>
       <button class="link" id="cancel-waiting">Cancel</button>
     </section>
@@ -119,6 +173,8 @@
         </button>
         <div class="diagram-wrap" id="diagram" hidden></div>
       </div>
+
+      <div class="options" id="options" role="group" aria-label="Answer options" hidden></div>
 
       <div class="field" id="attempt-field">
         <label class="label" for="attempt">Your answer</label>
@@ -169,8 +225,8 @@
           <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M9 18h6M10 21h4M12 3a6 6 0 00-3.6 10.8c.6.5 1 1.2 1.1 2V16h5v-.2c.1-.8.5-1.5 1.1-2A6 6 0 0012 3z"/></svg>
         </span>
         <span class="help-text">
-          <span class="help-title">Struggling? Get the prerequisite</span>
-          <span class="help-sub">The skills this question builds on, explained at your verbosity setting.</span>
+          <span class="help-title">Struggling? Learn the basics</span>
+          <span class="help-sub">The skills this one builds on.</span>
         </span>
         <svg class="help-arrow" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -233,27 +289,36 @@
     <section class="view" id="view-history" hidden>
       <span class="label">Your progress</span>
       <div class="stats">
-        <div class="stat" title="Answers marked correct by Check answer">
+        <div class="stat" title="Answers marked correct">
           <span class="stat-num mono" id="stat-solved">0</span>
           <span class="label">Solved</span>
         </div>
-        <div class="stat" title="Of the answers you looked at, how many you got right first">
+        <div class="stat" title="How many you got right first try">
           <span class="stat-num mono" id="stat-accuracy">–</span>
           <span class="label">Accuracy</span>
         </div>
-        <div class="stat" title="Days in a row you have practised">
+        <div class="stat" title="Days in a row you have practiced">
           <span class="stat-num mono" id="stat-streak">0</span>
           <span class="label">Day streak</span>
         </div>
       </div>
-      <p class="hint" id="history-empty">Sets you generate show up here, with how many you got right. Nothing leaves this device.</p>
-      <div class="history-part" id="topics-wrap">
-        <span class="label">Topics</span>
-        <ul class="topics" id="topics"></ul>
+      <div class="insight" id="insight" hidden>
+        <div class="insight-row best" id="insight-best">
+          <span class="insight-tag">Strongest</span>
+          <span class="insight-name" id="insight-best-name"></span>
+          <span class="insight-score mono" id="insight-best-score"></span>
+        </div>
+        <div class="insight-row worst" id="insight-worst">
+          <span class="insight-tag">Needs work</span>
+          <span class="insight-name" id="insight-worst-name"></span>
+          <span class="insight-score mono" id="insight-worst-score"></span>
+        </div>
+        <p class="hint" id="insight-hint" hidden></p>
       </div>
-      <div class="history-part" id="sets-wrap">
-        <span class="label">Recent sets</span>
-        <ul class="sets" id="sets"></ul>
+      <p class="hint" id="history-empty">Sets you generate show up here. Nothing leaves this device.</p>
+      <div class="history-part" id="folders-wrap">
+        <span class="label">By subject</span>
+        <ul class="folders" id="folders"></ul>
       </div>
       <div class="actions">
         <button class="btn secondary" id="history-back">Back</button>
@@ -278,16 +343,6 @@
           </div>
           <div class="content size-sample" id="size-sample"></div>
         </div>
-
-        <div class="field">
-          <span class="label">Verbosity</span>
-          <div class="segmented" id="verbosity" role="radiogroup" aria-label="Verbosity">
-            <button role="radio" data-value="brief">Brief</button>
-            <button role="radio" data-value="standard">Standard</button>
-            <button role="radio" data-value="detailed">Detailed</button>
-          </div>
-          <p class="hint" id="verbosity-hint"></p>
-        </div>
       </div>
 
       <div class="card settings-group" id="dev-settings" hidden>
@@ -304,11 +359,11 @@
           <span class="label">Founder token</span>
           <input class="input mono" id="founder-token" type="password" spellcheck="false" placeholder="Leave empty for the public tier">
         </label>
-        <p class="hint">Only shown in unpacked builds.</p>
+        <p class="hint">Unpacked builds only.</p>
       </div>
 
       <div class="card settings-group">
-        <p class="hint">Screenshots go to the StudyX server and on to the selected model provider. StudyX does not keep them; the provider's own retention policy applies. Reports keep the generated question, not the screenshot.</p>
+        <p class="hint">Screenshots go to the PracticeX server and on to the selected model provider. PracticeX does not keep them; the provider's own retention policy applies. Reports keep the generated question, not the screenshot.</p>
       </div>
 
       <div class="actions">

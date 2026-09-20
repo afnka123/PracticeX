@@ -69,7 +69,9 @@
     },
     permissions: { request: async () => true },
     windows: {
-      getLastFocused: async () => ({ id: 1 }),
+      getLastFocused: async () => ({ id: 1, left: 0, top: 0, width: 1440, height: 900 }),
+      getCurrent: async () => ({ id: nextWindow, state: "normal" }),
+      update: async () => {},
       create: async ({ url }) => {
         window.open(url.replace("chrome-extension://mock/", "/dev/preview.html"), "_blank");
         return { id: nextWindow++ };

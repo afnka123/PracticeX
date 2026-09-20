@@ -1,7 +1,6 @@
 import { renderDiagram } from "./diagram.js";
 import { parsePartialJson } from "./partial-json.js";
 
-const DEFAULT_SERVER = "http://localhost:8787";
 const MAX_IMAGE_SIDE = 1568; // larger images are downscaled by the model provider anyway
 const PAGE_ID = crypto.randomUUID(); // tells this page's own storage writes apart from other windows'
 const PARAMS = new URLSearchParams(location.search);
@@ -9,8 +8,26 @@ const FOCUS = PARAMS.has("focus"); // fullscreen practice window
 const CROP = PARAMS.has("crop"); // large window used only to select the problem on a screenshot
 // Unpacked (developer) builds have no update_url. Only they show the model, server and founder settings.
 const DEV = !("update_url" in chrome.runtime.getManifest());
+// The deployed server. Set this to the Render URL before packing; developer builds keep talking to
+// localhost and can point somewhere else in Settings.
+const PROD_SERVER = "https://practicex-server.onrender.com";
+const DEFAULT_SERVER = DEV ? "http://localhost:8787" : PROD_SERVER;
 const HISTORY_MAX = 40; // sets kept on this device
-const PROBLEM_FIELDS = ["question", "diagram", "answer", "accepted_answers", "approach", "steps", "check", "common_mistake"];
+const NO_DIAGRAM_SUBJECTS = new Set(["writing", "language", "history"]);
+// Folders. A set is filed under the class the student picked, or under the subject the model detected.
+const SUBJECT_LABELS = {
+  math: "Math",
+  physics: "Physics",
+  chemistry: "Chemistry",
+  biology: "Biology",
+  other_science: "Science",
+  writing: "Writing",
+  language: "Language",
+  history: "History",
+  other: "Other",
+};
+const MIN_FOR_INSIGHT = 4; // answers needed in a subject before calling it a strength or a weakness
+const PROBLEM_FIELDS = ["question", "diagram_useful", "diagram", "options", "correct_option", "answer", "accepted_answers", "approach", "steps", "check", "common_mistake"];
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,7 +35,9 @@ const $ = (id) => document.getElementById(id);
 let state = {
   view: "start",
   model: "",
-  difficulty: "same",
+  difficulty: 50, // 0 easy to 100 hard; older sessions may hold "easier"/"same"/"harder"
+  subject: "", // math, physics, ..., writing, language, history, other
+  courseId: "", // the class this set is filed under, "" for none
   topic: "",
   problems: [],
   expected: 0, // problems asked for; more than problems.length while a set is still streaming
@@ -27,6 +46,8 @@ let state = {
   revealed: [],
   work: [],
   attempts: [],
+  chosen: [], // multiple choice: the option index the student picked
+  wrongPicks: [], // multiple choice: options already tried and wrong
   checks: [], // per problem: { attempt, verdict, feedback } from Check answer
   diagramOpen: [],
   madeDiagrams: [], // diagrams drawn on request with "Make me a diagram"
@@ -35,11 +56,11 @@ let state = {
   image: null, // last cropped screenshot, for "More like these"
   prereq: null, // { topic, data, streaming, live }
 };
-let prefs = { textScale: 1, count: 3, verbosity: "standard" };
+let prefs = { textScale: 1, count: 3, verbosity: "standard", answerMix: 100, courseId: "", slider: "count" };
 const VERBOSITY_HINTS = {
-  brief: "Short steps with just the key move and the math.",
-  standard: "Each step says what to do and why, with every line of algebra.",
-  detailed: "Every move explained, including the ones you might do in your head.",
+  brief: "Just the key move and the math.",
+  standard: "",
+  detailed: "Every move, including the ones you do in your head.",
 };
 const drawing = new Set(); // "setId:index" of diagrams being drawn on request
 let settings = { serverUrl: DEFAULT_SERVER, founderToken: "" };
@@ -50,20 +71,27 @@ let cropWindowId = null;
 let viewBeforeCrop = "start";
 let viewBeforeHistory = "start";
 let viewBeforeSettings = "start";
-let history = []; // finished sets, most recently practised first; kept in chrome.storage.local
+let history = []; // finished sets, most recently practiced first; kept in chrome.storage.local
+let courses = []; // the student's classes: { id, name, subject, created }
+let openFolder = null; // "type:key" of the folder showing its topics; null until the first render picks one
+let openTopic = ""; // "folderKey|topicKey" of the topic showing its sets
 
 // ---------------------------------------------------------------- storage
 
 async function loadStorage() {
-  const local = await chrome.storage.local.get(["installId", "settings", "prefs", "history"]);
+  const local = await chrome.storage.local.get(["installId", "settings", "prefs", "history", "courses"]);
   history = Array.isArray(local.history) ? local.history : [];
+  courses = Array.isArray(local.courses) ? local.courses : [];
   installId = local.installId;
   if (!installId) {
     installId = crypto.randomUUID();
     await chrome.storage.local.set({ installId });
   }
   settings = { ...settings, ...(local.settings || {}) };
+  if (!DEV) settings.serverUrl = DEFAULT_SERVER;
   prefs = { ...prefs, ...(local.prefs || {}) };
+  // The written/choices pair used to be two buttons; it is a slider now, so old prefs land on an end.
+  if (typeof prefs.answerMix !== "number") prefs.answerMix = prefs.answerFormat === "multiple_choice" ? 0 : 100;
   const session = await chrome.storage.session.get("state");
   if (session.state) state = { ...state, ...session.state.data };
   state.problems = state.problems.map((p) => ({ ...p, steps: toSteps(p.steps) })); // sessions saved before step titles
@@ -93,6 +121,12 @@ function savePrefs() {
 
 function watchStorage() {
   chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.courses) {
+      courses = changes.courses.newValue || [];
+      if (state.view === "start") renderClasses();
+      else if (state.view === "history") renderHistory();
+      return;
+    }
     if (area === "local" && changes.history) {
       history = changes.history.newValue || [];
       if (state.view === "history") renderHistory();
@@ -147,9 +181,14 @@ function serverBase() {
 }
 
 async function request(path, body, signal) {
-  const headers = { "X-StudyX-Install": installId };
+  // The X-StudyX-* pair is the name these headers had before the rename. Both go out until every
+  // server is on a build that reads the new name; drop them once it is.
+  const headers = { "X-PracticeX-Install": installId, "X-StudyX-Install": installId };
   if (body) headers["Content-Type"] = "application/json";
-  if (settings.founderToken) headers["X-StudyX-Founder"] = settings.founderToken;
+  if (settings.founderToken) {
+    headers["X-PracticeX-Founder"] = settings.founderToken;
+    headers["X-StudyX-Founder"] = settings.founderToken;
+  }
   try {
     return await fetch(serverBase() + path, {
       method: body ? "POST" : "GET",
@@ -159,7 +198,7 @@ async function request(path, body, signal) {
     });
   } catch (err) {
     if (err.name === "AbortError") throw err;
-    throw new ServerError(`The StudyX server is not reachable at ${serverBase()}. Check Settings.`, 0);
+    throw new ServerError(`The PracticeX server is not reachable at ${serverBase()}. Check Settings.`, 0);
   }
 }
 
@@ -223,12 +262,40 @@ function describeError(err) {
 function setUsage(usage) {
   if (!config) config = {};
   config.usage = usage;
-  const left = Math.max(0, usage.limit - usage.used);
-  const counter = $("counter");
-  counter.textContent = `${left}/${usage.limit}`;
-  counter.title = `${left} of ${usage.limit} left this hour`;
-  counter.classList.toggle("empty", left === 0);
-  $("generate").disabled = left === 0;
+  renderUsage();
+}
+
+function questionsLeft() {
+  const usage = config?.usage;
+  if (!usage) return null;
+  return Math.max(0, usage.limit - usage.used);
+}
+
+// The hourly allowance, in one quiet line under the header. It says enough to explain itself
+// and stays out of the way until it runs low.
+function renderUsage() {
+  const usage = config?.usage;
+  const box = $("usage");
+  const left = questionsLeft();
+  if (left === null) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const out = left === 0;
+  box.classList.toggle("out", out);
+  box.classList.toggle("low", !out && left <= 3);
+  const resets = usage.resets_at ? formatTime(usage.resets_at) : "";
+  if (out) {
+    $("usage-main").textContent = resets ? `No questions left until ${resets}` : "No questions left this hour";
+  } else {
+    $("usage-main").textContent = `${left} question${left === 1 ? "" : "s"} left this hour`;
+  }
+  box.title = `${left} of ${usage.limit} questions this hour.${resets ? ` The count resets at ${resets}.` : ""}`;
+  // Everything that would spend a question says so rather than failing on the server.
+  const spenders = [$("generate"), $("new-set"), ...$("more-options").querySelectorAll("button")];
+  for (const b of spenders) b.disabled = out;
+  $("generate").textContent = out ? "Limit reached" : "Screenshot";
 }
 
 // Runs fn at most once every `ms` while triggered; cancel() drops a pending run.
@@ -388,10 +455,157 @@ function applyTextScale() {
   $("text-size-value").textContent = `${Math.round(prefs.textScale * 100)}%`;
 }
 
+// Difficulty is a number from 0 (easy) to 100 (hard), the same scale the server reads. It slides
+// continuously; these bands only decide what to call the spot the student stopped at.
+const DIFFICULTY_BANDS = [
+  [15, "Very easy", "Much simpler than the question you screenshot."],
+  [37, "Easy", "A step simpler than the question you screenshot."],
+  [63, "Medium", "The same level as the question you screenshot."],
+  [85, "Hard", "A step up from the question you screenshot."],
+  [100, "Very hard", "Well above the question you screenshot."],
+];
+// The two ends are earned, not passed through: you only get them by pushing the handle all the way.
+const DIFFICULTY_ENDS = {
+  0: ["Layup", "A warm-up. The idea with nothing in the way."],
+  100: ["Extreme", "Competition hard. Expect to be stuck for a while."],
+};
+const LEGACY_DIFFICULTY = { easier: 25, same: 50, harder: 75 }; // sessions saved before the slider
+
+function difficultyLevel(value = state.difficulty) {
+  if (typeof value === "string") return LEGACY_DIFFICULTY[value] ?? 50;
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 50;
+}
+
+function difficultyBand(level) {
+  const end = DIFFICULTY_ENDS[level];
+  if (end) return [level, ...end];
+  return DIFFICULTY_BANDS.find(([top]) => level <= top) || DIFFICULTY_BANDS[DIFFICULTY_BANDS.length - 1];
+}
+
+// Soft teal at 0, green, amber, red, then purple at 100 - the same stops the track is painted with.
+// The last hue is negative so the ramp runs red to magenta to purple instead of back through green.
+const DIFFICULTY_STOPS = [
+  [0, [172, 40, 64]],
+  [0.14, [146, 44, 62]],
+  [0.5, [45, 72, 58]],
+  [0.86, [8, 66, 52]],
+  [1, [-78, 52, 62]],
+];
+
+function difficultyColor(level) {
+  const t = level / 100;
+  let i = DIFFICULTY_STOPS.findIndex(([at]) => t <= at);
+  if (i <= 0) i = 1;
+  const [t0, a] = DIFFICULTY_STOPS[i - 1];
+  const [t1, b] = DIFFICULTY_STOPS[i];
+  const f = t1 === t0 ? 0 : (t - t0) / (t1 - t0);
+  const [h, sat, light] = a.map((v, k) => v + (b[k] - v) * f);
+  return `hsl(${Math.round((h + 360) % 360)}, ${Math.round(sat)}%, ${Math.round(light)}%)`;
+}
+
+const saveDifficulty = throttle(() => save(), 250);
+
+function applyDifficulty({ animate = false } = {}) {
+  const level = difficultyLevel();
+  const [, word, means] = difficultyBand(level);
+  const field = $("slider-field");
+  $("difficulty").value = level;
+  field.style.setProperty("--dt", level / 100);
+  field.style.setProperty("--dcolor", difficultyColor(level));
+  $("diff-readout").textContent = word;
+  $("difficulty").setAttribute("aria-valuetext", `${word}, ${level} of 100`);
+  $("diff-body").title = means;
+  // The three labels are the scale, so the nearest one marks where the handle is.
+  const near = level <= 33 ? 0 : level >= 67 ? 2 : 1;
+  [...$("diff-ticks").children].forEach((t, k) => t.classList.toggle("current", k === near));
+  // An end is a small event: the readout above the slider becomes a badge in that end's colour.
+  const unlocked = Boolean(DIFFICULTY_ENDS[level]);
+  const readout = $("diff-readout");
+  if (unlocked && !readout.classList.contains("unlocked")) {
+    readout.classList.remove("pop");
+    void readout.offsetWidth; // restart the animation
+    readout.classList.add("pop");
+  }
+  readout.classList.toggle("unlocked", unlocked);
+  if (animate) {
+    const node = $("diff-wrap");
+    node.classList.remove("pop");
+    void node.offsetWidth; // restart the animation
+    node.classList.add("pop");
+  }
+  renderCurrentSettings();
+}
+
+// Answer style is a leaning, not a switch: 0 is every question multiple choice, 100 is every question
+// written, and the middle asks for a mix. Only the two ends map cleanly onto one server format.
+const ANSWER_BANDS = [
+  [10, "Choices", "Every question multiple choice."],
+  [35, "Lean choices", "Mostly multiple choice, some written."],
+  [65, "Either", "A mix of multiple choice and written."],
+  [90, "Lean written", "Mostly written, some multiple choice."],
+  [100, "Written", "Every question written out."],
+];
+
+function answerMix() {
+  const v = prefs.answerMix;
+  return typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 100;
+}
+
+function answerBand(mix) {
+  return ANSWER_BANDS.find(([top]) => mix <= top) || ANSWER_BANDS[ANSWER_BANDS.length - 1];
+}
+
+// What the server is actually asked for. The ends are the two formats it has always taken.
+function answerFormat(mix = answerMix()) {
+  return mix <= 10 ? "multiple_choice" : mix >= 90 ? "free" : "mixed";
+}
+
+function applyAnswers({ animate = false } = {}) {
+  const mix = answerMix();
+  const [, word, means] = answerBand(mix);
+  const field = $("slider-field");
+  $("answer-mix").value = mix;
+  field.style.setProperty("--at", mix / 100);
+  // Indigo when it leans on choices, peach when it leans on written, grey in the middle.
+  const off = Math.abs(mix - 50) / 50;
+  field.style.setProperty("--acolor", mix < 50 ? `hsl(224, ${30 + off * 30}%, ${64 + off * 4}%)` : `hsl(24, ${20 + off * 55}%, ${68 + off * 6}%)`);
+  $("ans-readout").textContent = word;
+  $("answer-mix").setAttribute("aria-valuetext", means);
+  $("ans-body").title = means;
+  const near = mix <= 33 ? 0 : mix >= 67 ? 2 : 1;
+  [...$("ans-ticks").children].forEach((t, k) => t.classList.toggle("current", k === near));
+  if (animate) {
+    const node = $("ans-wrap");
+    node.classList.remove("pop");
+    void node.offsetWidth; // restart the animation
+    node.classList.add("pop");
+  }
+  renderCurrentSettings();
+}
+
+const SLIDERS = ["count", "difficulty", "answers", "verbosity"];
+const SLIDER_BODY = { count: "count-body", difficulty: "diff-body", answers: "ans-body", verbosity: "verb-body" };
+// Verbosity has no readout: the segmented control already shows which one is on.
+const SLIDER_READOUT = { count: "count-readout", difficulty: "diff-readout", answers: "ans-readout" };
+
+// The three bodies sit in one grid cell so the field never changes height, and the one on top
+// fades in rather than snapping: nothing below it moves when you switch.
+function renderSliderPick() {
+  const which = SLIDERS.includes(prefs.slider) ? prefs.slider : "count";
+  $("slider-pick").value = which;
+  for (const name of SLIDERS) {
+    const on = name === which;
+    const body = $(SLIDER_BODY[name]);
+    body.classList.toggle("on", on);
+    body.inert = !on;
+    if (SLIDER_READOUT[name]) $(SLIDER_READOUT[name]).classList.toggle("on", on);
+  }
+}
+
 function applyCount({ animate = false } = {}) {
   const v = prefs.count;
   $("count").value = v;
-  $("count-field").style.setProperty("--v", v);
+  $("slider-field").style.setProperty("--v", v);
   $("count-readout").textContent = v;
   $("count").setAttribute("aria-valuetext", `${v} problem${v > 1 ? "s" : ""}`);
   [...$("count-ticks").children].forEach((t, i) => {
@@ -405,6 +619,19 @@ function applyCount({ animate = false } = {}) {
       node.classList.add("pop");
     }
   }
+  renderCurrentSettings();
+}
+
+// One place that says what Generate will produce: the slider only shows one of these at a time,
+// and the explanation style lives over in settings.
+function renderCurrentSettings() {
+  const level = difficultyLevel();
+  const [, word] = difficultyBand(level);
+  $("cs-difficulty").textContent = word;
+  $("cs-difficulty").style.color = difficultyColor(level);
+  $("cs-count").textContent = prefs.count;
+  $("cs-answers").textContent = answerBand(answerMix())[1];
+  $("cs-verbosity").textContent = prefs.verbosity.charAt(0).toUpperCase() + prefs.verbosity.slice(1);
 }
 
 // ---------------------------------------------------------------- start
@@ -432,14 +659,12 @@ function renderModels() {
 
 function renderStart(opts) {
   renderModels();
-  const usage = config?.usage;
-  if (usage && usage.used >= usage.limit && usage.resets_at) {
-    notice(`${usage.limit} per hour. Resets at ${formatTime(usage.resets_at)}.`);
-  }
-  for (const b of $("difficulty").querySelectorAll("button")) {
-    b.setAttribute("aria-checked", String(b.dataset.value === state.difficulty));
-  }
+  applyDifficulty();
   applyCount();
+  applyAnswers();
+  renderVerbosity();
+  renderSliderPick();
+  renderClasses();
   renderRecent();
   show("start", opts);
 }
@@ -452,7 +677,7 @@ async function capture() {
     granted = await chrome.permissions.request({ origins: ["<all_urls>"] });
   } catch {}
   if (!granted) {
-    notice("StudyX needs permission to see the page before it can read the problem.");
+    notice("PracticeX needs permission to see the page before it can read the problem.");
     return;
   }
   let dataUrl;
@@ -464,8 +689,8 @@ async function capture() {
     return;
   }
 
-  if (FOCUS) {
-    // Focus mode is already fullscreen, so select in place.
+  if (FOCUS || window.innerWidth >= FOCUS_WIDTH) {
+    // The window is already big enough to select in, so no second window is needed.
     shot = { dataUrl, sel: null };
     $("shot").src = dataUrl;
     $("crop-box").hidden = true;
@@ -474,7 +699,7 @@ async function capture() {
     return;
   }
 
-  // The side panel is too narrow to select comfortably: open a window that fills most of the screen.
+  // The panel window is too narrow to select comfortably: open one that fills most of the screen.
   await chrome.storage.session.set({ pendingShot: { dataUrl, requester: PAGE_ID } });
   const width = Math.round(screen.availWidth * 0.94);
   const height = Math.round(screen.availHeight * 0.94);
@@ -596,7 +821,11 @@ function toProblem(raw, complete) {
   for (const f of PROBLEM_FIELDS) done[f] = complete || (keys.includes(f) && f !== last);
   return {
     question: typeof raw.question === "string" ? raw.question : "",
+    // Missing in sets saved before the model rated each question; those keep the old behavior.
+    diagram_useful: raw.diagram_useful !== false,
     diagram: raw.diagram && typeof raw.diagram === "object" ? raw.diagram : null,
+    options: Array.isArray(raw.options) ? raw.options.filter((o) => typeof o === "string") : [],
+    correct_option: Number.isInteger(raw.correct_option) ? raw.correct_option : null,
     answer: typeof raw.answer === "string" ? raw.answer : "",
     accepted_answers: Array.isArray(raw.accepted_answers) ? raw.accepted_answers.filter((a) => typeof a === "string") : [],
     approach: typeof raw.approach === "string" ? raw.approach : "",
@@ -620,7 +849,7 @@ function toSteps(list) {
 function setProblems(rawList, complete) {
   state.problems = rawList.map((p, k) => toProblem(p, complete || k < rawList.length - 1));
   const n = Math.max(state.problems.length, state.expected);
-  const fills = { revealed: false, work: false, attempts: "", checks: null, diagramOpen: null, madeDiagrams: null, stepsOpen: null };
+  const fills = { revealed: false, work: false, attempts: "", chosen: null, wrongPicks: null, checks: null, diagramOpen: null, madeDiagrams: null, stepsOpen: null };
   for (const [key, fill] of Object.entries(fills)) {
     if (!Array.isArray(state[key])) state[key] = [];
     while (state[key].length < n) state[key].push(fill);
@@ -636,6 +865,8 @@ async function generate(image) {
   notice("");
   shot = null;
   Object.assign(state, {
+    subject: "",
+    courseId: prefs.courseId,
     topic: "",
     problems: [],
     expected: prefs.count,
@@ -644,6 +875,8 @@ async function generate(image) {
     revealed: [],
     work: [],
     attempts: [],
+    chosen: [],
+    wrongPicks: [],
     checks: [],
     diagramOpen: [],
     madeDiagrams: [],
@@ -660,6 +893,7 @@ async function generate(image) {
   const redraw = throttle(() => {
     const partial = parsePartialJson(text);
     if (!partial || generation !== controller) return;
+    if (typeof partial.subject === "string") state.subject = partial.subject;
     if (typeof partial.topic === "string") state.topic = partial.topic;
     const raw = Array.isArray(partial.problems) ? partial.problems.filter((p) => p && typeof p === "object") : [];
     setProblems(raw, false);
@@ -676,6 +910,8 @@ async function generate(image) {
         difficulty: state.difficulty,
         count: prefs.count,
         verbosity: prefs.verbosity,
+        answer_format: answerFormat(),
+        answer_mix: answerMix(),
       },
       (delta) => {
         text += delta;
@@ -688,10 +924,11 @@ async function generate(image) {
     generation = null;
     if (!result.readable) {
       state = before;
-      notice("No math problem found there. Select just the problem and try again.");
+      notice("No question found there. Select just the question and try again.");
       renderCurrent();
       return;
     }
+    state.subject = result.subject;
     state.topic = result.topic;
     state.streaming = false;
     state.expected = result.problems.length;
@@ -708,9 +945,13 @@ async function generate(image) {
   }
 }
 
-function moreLikeThese(difficulty) {
+const MORE_NUDGE = { easier: -25, same: 0, harder: 25 };
+
+function moreLikeThese(which) {
   notice("");
-  if (difficulty) state.difficulty = difficulty;
+  if (which in MORE_NUDGE) {
+    state.difficulty = Math.max(0, Math.min(100, difficultyLevel() + MORE_NUDGE[which]));
+  }
   if (!state.image) {
     startOver();
     return;
@@ -798,8 +1039,9 @@ function renderDiagramArea(i, p) {
     return;
   }
   if (!diagram) {
-    // The model left this one without a figure; the student can still ask for one.
-    if (!p._done.diagram) return hideAll();
+    // No figure yet. The student can ask for one, but only where the model judged a figure could help:
+    // never for writing, language or history, and not for simple arithmetic.
+    if (!p._done.diagram || !p.diagram_useful || NO_DIAGRAM_SUBJECTS.has(state.subject)) return hideAll();
     toggle.dataset.action = "make";
     label.textContent = "Make me a diagram";
     wrap.hidden = true;
@@ -816,10 +1058,23 @@ function renderDiagramArea(i, p) {
   const key = `${i}:${JSON.stringify(diagram)}`;
   if (open && wrap.dataset.src !== key) {
     wrap.dataset.src = key;
-    const svg = renderDiagram(diagram);
-    wrap.replaceChildren(...(svg ? [svg] : []));
-    if (!svg) hideAll();
+    const figure = renderDiagram(diagram);
+    wrap.replaceChildren(...(figure ? [figure, diagramNote()] : []));
+    if (!figure) hideAll();
   }
+}
+
+// A figure can hand over an answer that was meant to be worked out, so it says so, quietly, beside itself.
+function diagramNote() {
+  const note = document.createElement("aside");
+  note.className = "diagram-note";
+  const label = document.createElement("span");
+  label.className = "label";
+  label.textContent = "Note";
+  const body = document.createElement("p");
+  body.textContent = "A figure can give away the answer. Read it to check your working, not to skip it.";
+  note.append(label, body);
+  return note;
 }
 
 async function makeDiagram() {
@@ -832,7 +1087,12 @@ async function makeDiagram() {
   notice("");
   renderProblem();
   try {
-    const data = await api("/v1/diagram", { model: state.model, topic: state.topic, question: p.question });
+    const data = await api("/v1/diagram", {
+      model: state.model,
+      subject: state.subject,
+      topic: state.topic,
+      question: p.question,
+    });
     if (state.setId === setId) {
       state.madeDiagrams[i] = data.diagram;
       state.diagramOpen[i] = true;
@@ -862,11 +1122,13 @@ function renderProblem(opts) {
   $("question").hidden = writing;
   if (p) setRich($("question"), p.question, p._live === "question");
   renderDiagramArea(i, p);
+  renderOptions(i, p);
 
   // Setting an unchanged value would move the caret, so only write it when it differs.
   if ($("attempt").value !== attempt) $("attempt").value = attempt;
   $("attempt").readOnly = revealed;
-  $("attempt-field").hidden = writing || (revealed && !attempt);
+  // Multiple choice answers by clicking, so the typing box is not shown at all.
+  $("attempt-field").hidden = writing || Boolean(p?.options.length) || (revealed && !attempt);
   renderCheckResult(i);
 
   $("reveal").hidden = !revealed;
@@ -949,7 +1211,9 @@ function renderActions() {
 
   if (!state.revealed[i]) {
     const typed = (state.attempts[i] || "").trim().length > 0;
-    if (!ready) {
+    if (p.options.length) {
+      actions.append(button(p._done.correct_option ? "View answer" : "Writing options", "primary", reveal, !p._done.correct_option));
+    } else if (!ready) {
       actions.append(button("Writing answer", "primary", () => {}, true));
     } else if (typed) {
       const busy = checking.has(`${state.setId}:${i}`);
@@ -968,11 +1232,72 @@ function renderActions() {
   );
 }
 
+const LETTERS = "ABCDEF";
+
+// Multiple choice: the options replace the typing box, and clicking one is the answer.
+function renderOptions(i, p) {
+  const box = $("options");
+  const options = p?.options || [];
+  box.hidden = !options.length;
+  if (!options.length) {
+    box.replaceChildren();
+    return;
+  }
+  const ready = p._done.correct_option;
+  const revealed = state.revealed[i];
+  const chosen = state.chosen[i];
+  const wrong = state.wrongPicks[i] || [];
+  if (box.children.length > options.length) {
+    if (window.MathJax?.typesetClear) MathJax.typesetClear([box]);
+    box.replaceChildren();
+  }
+  options.forEach((text, k) => {
+    let b = box.children[k];
+    if (!b) {
+      b = document.createElement("button");
+      b.className = "option";
+      const letter = document.createElement("span");
+      letter.className = "letter";
+      letter.textContent = LETTERS[k];
+      const body = document.createElement("span");
+      body.className = "option-text content";
+      b.append(letter, body);
+      b.addEventListener("click", () => choose(k));
+      box.append(b);
+    }
+    setRich(b.lastChild, text, !ready && p._live === "options" && k === options.length - 1);
+    const isCorrect = revealed && k === p.correct_option;
+    b.classList.toggle("correct", Boolean(isCorrect || (chosen === k && k === p.correct_option)));
+    b.classList.toggle("wrong", wrong.includes(k));
+    b.disabled = !ready || revealed || wrong.includes(k);
+    b.setAttribute("aria-pressed", String(chosen === k));
+  });
+}
+
+function choose(k) {
+  const i = state.index;
+  const p = state.problems[i];
+  if (!p?._done.correct_option || state.revealed[i]) return;
+  notice("");
+  state.chosen[i] = k;
+  const right = k === p.correct_option;
+  if (right) {
+    state.revealed[i] = true;
+    state.checks[i] = { attempt: LETTERS[k], verdict: "correct", feedback: "" };
+  } else {
+    state.wrongPicks[i] = [...(state.wrongPicks[i] || []), k];
+    state.checks[i] = { attempt: LETTERS[k], verdict: "incorrect", feedback: "Try another option." };
+  }
+  renderProblem();
+  flash(right ? "flash" : "miss", $("options").children[k]);
+}
+
 function renderCheckResult(i) {
   const result = state.checks[i];
   const box = $("attempt-box");
+  const multipleChoice = Boolean(state.problems[i]?.options.length);
   // A result only stands while the student's answer is the one that was checked.
-  const current = result && result.attempt === (state.attempts[i] || "").trim();
+  const current = result && (multipleChoice ? state.chosen[i] != null : result.attempt === (state.attempts[i] || "").trim());
   $("check-result").hidden = !current;
   box.classList.toggle("correct", Boolean(current && result.verdict === "correct"));
   if (!current) return;
@@ -985,8 +1310,7 @@ function renderCheckResult(i) {
 
 const checking = new Set(); // "setId:index" of answers being checked
 
-function flash(kind) {
-  const box = $("attempt-box");
+function flash(kind, box = $("attempt-box")) {
   box.classList.remove("flash", "miss");
   void box.offsetWidth; // restart the animation
   box.classList.add(kind);
@@ -1197,8 +1521,142 @@ function renderPrereq(opts) {
   show("prereq", { quiet: opts?.quiet || pr.streaming });
 }
 
+// ---------------------------------------------------------------- classes
+// The student names the classes they are taking. Every set they practice is filed under the class
+// that was selected when it was generated, so progress can be read one course at a time.
+
+function saveCourses() {
+  return chrome.storage.local.set({ courses });
+}
+
+function courseById(id) {
+  return courses.find((c) => c.id === id) || null;
+}
+
+// The subject a set counts toward: what the class is about, or what the model saw in the question.
+function subjectOf(h) {
+  const course = courseById(h.courseId);
+  const subject = course?.subject || h.subject || "";
+  return SUBJECT_LABELS[subject] ? subject : "other";
+}
+
+function subjectName(subject) {
+  return SUBJECT_LABELS[subject] || SUBJECT_LABELS.other;
+}
+
+function renderClasses() {
+  const wrap = $("classes");
+  const chips = [];
+  if (courses.length) {
+    chips.push(classChip({ id: "", name: "No class" }));
+    for (const c of courses) chips.push(classChip(c));
+  }
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "add";
+  add.textContent = courses.length ? "+ Add" : "+ Add a class";
+  add.addEventListener("click", () => openAddClass());
+  chips.push(add);
+  wrap.replaceChildren(...chips);
+
+  $("edit-classes").hidden = courses.length === 0;
+  $("edit-classes").textContent = wrap.dataset.editing ? "Done" : "Edit";
+  $("class-hint").textContent = courses.length ? "" : "Sorts your practice by course.";
+  $("class-hint").hidden = courses.length > 0;
+}
+
+function classChip(course) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.setAttribute("role", "radio");
+  const on = (prefs.courseId || "") === course.id;
+  b.classList.toggle("on", on);
+  b.setAttribute("aria-checked", String(on));
+  b.append(course.name);
+  const editing = Boolean($("classes").dataset.editing) && course.id;
+  if (editing) {
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = "x";
+    x.setAttribute("aria-hidden", "true");
+    b.append(x);
+    b.title = `Remove ${course.name}`;
+  }
+  b.addEventListener("click", () => {
+    if (!editing) {
+      prefs.courseId = course.id;
+      savePrefs();
+      renderClasses();
+      return;
+    }
+    // Two taps to remove, so one stray click cannot delete a class.
+    if (b.dataset.armed) return removeClass(course.id);
+    b.dataset.armed = "1";
+    b.classList.add("arm");
+    b.replaceChildren("Remove?");
+    setTimeout(() => {
+      if (b.isConnected && b.dataset.armed) renderClasses();
+    }, 4000);
+  });
+  return b;
+}
+
+function openAddClass(open = true) {
+  const form = $("add-class");
+  form.hidden = !open;
+  if (!open) return;
+  const select = $("class-subject");
+  if (!select.options.length) {
+    const auto = document.createElement("option");
+    auto.value = "";
+    auto.textContent = "Subject: from the questions";
+    select.append(auto);
+    for (const [value, label] of Object.entries(SUBJECT_LABELS)) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = label;
+      select.append(opt);
+    }
+  }
+  $("class-name").value = "";
+  select.value = "";
+  $("class-name").focus();
+}
+
+async function addClass(event) {
+  event.preventDefault();
+  const name = $("class-name").value.trim().slice(0, 40);
+  if (!name) return $("class-name").focus();
+  const course = { id: crypto.randomUUID(), name, subject: $("class-subject").value, created: Date.now() };
+  courses = [...courses, course];
+  prefs.courseId = course.id; // what you just added is what you are about to practice
+  savePrefs();
+  await saveCourses();
+  openAddClass(false);
+  renderClasses();
+}
+
+// Removing a class keeps its sets: they fall back to being filed by subject.
+async function removeClass(id) {
+  courses = courses.filter((c) => c.id !== id);
+  if (prefs.courseId === id) {
+    prefs.courseId = "";
+    savePrefs();
+  }
+  delete $("classes").dataset.editing;
+  await saveCourses();
+  renderClasses();
+}
+
+function toggleEditClasses() {
+  const wrap = $("classes");
+  if (wrap.dataset.editing) delete wrap.dataset.editing;
+  else wrap.dataset.editing = "1";
+  renderClasses();
+}
+
 // ---------------------------------------------------------------- history and progress
-// Finished sets are kept on this device (never the screenshot), so a student can see what they have practised,
+// Finished sets are kept on this device (never the screenshot), so a student can see what they have practiced,
 // how often they got it right, and reopen a set to try it again.
 
 const pendingHistory = new Map(); // setId -> entry waiting to be written
@@ -1215,6 +1673,8 @@ function historyEntry() {
     id: state.setId,
     updated: Date.now(),
     topic: state.topic || "Practice set",
+    subject: state.subject || "",
+    courseId: state.courseId || "",
     difficulty: state.difficulty,
     problems: state.problems.map(({ _done, _live, _stepLive, ...p }) => p),
     revealed: Array.from({ length: n }, (_, k) => Boolean(state.revealed[k])),
@@ -1244,9 +1704,9 @@ async function flushHistory() {
     const old = list.find((h) => h.id === entry.id);
     // Only real practice counts toward the streak and moves a set up the list, not just reopening it.
     const progress = (h) => JSON.stringify([h.revealed, h.checks, h.attempts, h.made]);
-    const practised = !old || progress(old) !== progress(entry);
-    const days = [...new Set([...(old?.days || []), ...(practised ? [dayKey(entry.updated)] : [])])];
-    const updated = practised ? entry.updated : old.updated;
+    const practiced = !old || progress(old) !== progress(entry);
+    const days = [...new Set([...(old?.days || []), ...(practiced ? [dayKey(entry.updated)] : [])])];
+    const updated = practiced ? entry.updated : old.updated;
     list = [{ ...entry, updated, at: old?.at ?? entry.updated, days }, ...list.filter((h) => h.id !== entry.id)];
     list.sort((x, y) => y.updated - x.updated);
   }
@@ -1282,7 +1742,8 @@ function formatWhen(time) {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function setRow(h) {
+// Under a topic the name is already on screen, so the row leads with when it was practiced instead.
+function setRow(h, nested = false) {
   const { correct, answered, total } = setScore(h);
   const li = document.createElement("li");
   const b = document.createElement("button");
@@ -1291,11 +1752,15 @@ function setRow(h) {
   main.className = "set-main";
   const topic = document.createElement("span");
   topic.className = "set-topic";
-  topic.textContent = h.topic;
+  topic.textContent = nested ? formatWhen(h.updated) : h.topic;
   const meta = document.createElement("span");
   meta.className = "set-meta mono";
-  const level = { easier: "Easier", same: "", harder: "Harder" }[h.difficulty] || "";
-  meta.textContent = [formatWhen(h.updated), level].filter(Boolean).join(" · ");
+  const band = difficultyBand(difficultyLevel(h.difficulty));
+  const level = band[1] === "Medium" ? "" : band[1];
+  meta.textContent = nested
+    ? level
+    : [formatWhen(h.updated), folderOf(h).name, level].filter(Boolean).join(" · ");
+  meta.hidden = !meta.textContent;
   main.append(topic, meta);
   const score = document.createElement("span");
   score.className = "set-score mono";
@@ -1303,7 +1768,7 @@ function setRow(h) {
   score.title = answered ? `${correct} right of ${total}, ${answered} answered` : "Not tried yet";
   score.classList.toggle("done", total > 0 && correct === total);
   b.append(main, score);
-  b.setAttribute("aria-label", `${h.topic}, ${meta.textContent}, ${score.title}. Open this set.`);
+  b.setAttribute("aria-label", `${h.topic}, ${formatWhen(h.updated)}, ${score.title}. Open this set.`);
   b.addEventListener("click", () => openHistorySet(h.id));
   li.append(b);
   return li;
@@ -1311,56 +1776,193 @@ function setRow(h) {
 
 function renderRecent() {
   $("recent").hidden = history.length === 0;
-  $("recent-sets").replaceChildren(...history.slice(0, 3).map(setRow));
+  $("recent-sets").replaceChildren(...history.slice(0, 3).map((h) => setRow(h)));
+}
+
+// Every set belongs to exactly one folder: the class it was generated under, or its subject.
+function folderOf(h) {
+  const course = courseById(h.courseId);
+  if (course) return { type: "course", key: course.id, name: course.name, subject: subjectOf(h) };
+  // Sets from before folders existed, and anything the model could not place, sit together.
+  if (!h.subject) return { type: "subject", key: "unsorted", name: "Unsorted", subject: "other" };
+  const subject = subjectOf(h);
+  return { type: "subject", key: subject, name: subjectName(subject), subject };
+}
+
+// Strength and weakness are read per subject, across every folder, so two classes in the
+// same subject count together.
+function subjectStats() {
+  const map = new Map();
+  for (const h of history) {
+    const subject = subjectOf(h);
+    const s = setScore(h);
+    const t = map.get(subject) || { subject, name: subjectName(subject), correct: 0, answered: 0 };
+    t.correct += s.correct;
+    t.answered += s.answered;
+    map.set(subject, t);
+  }
+  return [...map.values()];
+}
+
+function renderInsight() {
+  const ranked = subjectStats()
+    .filter((t) => t.answered >= MIN_FOR_INSIGHT)
+    .sort((a, b) => b.correct / b.answered - a.correct / a.answered);
+  const box = $("insight");
+  box.hidden = history.length === 0;
+  if (box.hidden) return;
+  const pct = (t) => `${Math.round((100 * t.correct) / t.answered)}% of ${t.answered}`;
+  const enough = ranked.length >= 2;
+  $("insight-best").hidden = ranked.length === 0;
+  $("insight-worst").hidden = !enough;
+  $("insight-hint").hidden = enough;
+  if (ranked.length) {
+    $("insight-best-name").textContent = ranked[0].name;
+    $("insight-best-score").textContent = pct(ranked[0]);
+  }
+  if (enough) {
+    const worst = ranked[ranked.length - 1];
+    $("insight-worst-name").textContent = worst.name;
+    $("insight-worst-score").textContent = pct(worst);
+  }
+  $("insight-hint").textContent = `Needs ${MIN_FOR_INSIGHT} answers in two subjects.`;
+}
+
+function scoreMeta(row) {
+  return `${row.sets} set${row.sets > 1 ? "s" : ""} · ${row.answered ? `${row.correct}/${row.answered}` : "new"}`;
+}
+
+function bar(row) {
+  const el = document.createElement("span");
+  el.className = "topic-bar";
+  el.style.setProperty("--p", row.answered ? row.correct / row.answered : 0);
+  el.setAttribute("aria-hidden", "true");
+  return el;
+}
+
+// Practice reads folder first, then the topics inside it. Folders open one at a time.
+function topicRow(folderKey, t) {
+  const li = document.createElement("li");
+  const key = `${folderKey}|${t.key}`;
+  const open = openTopic === key && t.sets > 1;
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "subtopic";
+  head.classList.toggle("open", open);
+  const name = document.createElement("span");
+  name.className = "topic-name";
+  name.textContent = t.name;
+  const meta = document.createElement("span");
+  meta.className = "set-meta mono";
+  meta.textContent = scoreMeta(t);
+  head.append(name, meta, bar(t));
+  // One set opens straight away; several list their dates first.
+  const single = t.sets === 1;
+  head.setAttribute("aria-label", `${t.name}, ${scoreMeta(t)}. ${single ? "Open it." : "Show its sets."}`);
+  if (!single) head.setAttribute("aria-expanded", String(open));
+  head.addEventListener("click", () => {
+    if (single) return openHistorySet(t.sets_[0].id);
+    openTopic = open ? "" : key;
+    renderFolders();
+  });
+  li.append(head);
+  if (open) {
+    const ul = document.createElement("ul");
+    ul.className = "subsets";
+    ul.append(...t.sets_.map((h) => setRow(h, true)));
+    li.append(ul);
+  }
+  return li;
+}
+
+function folderRow(f) {
+  const li = document.createElement("li");
+  const folderKey = `${f.type}:${f.key}`;
+  const open = openFolder === folderKey;
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "folder-row";
+  head.classList.toggle("open", open);
+  const caret = document.createElement("span");
+  caret.className = "caret";
+  caret.setAttribute("aria-hidden", "true");
+  const name = document.createElement("span");
+  name.className = "topic-name";
+  name.textContent = f.name;
+  const meta = document.createElement("span");
+  meta.className = "set-meta mono";
+  meta.textContent = scoreMeta(f);
+  head.append(caret, name, meta, bar(f));
+  head.setAttribute("aria-expanded", String(open));
+  head.setAttribute("aria-label", `${f.name}, ${scoreMeta(f)}. Show topics.`);
+  head.addEventListener("click", () => {
+    openFolder = open ? "" : folderKey;
+    openTopic = "";
+    renderFolders();
+  });
+  li.append(head);
+  if (open && f.topics.size) {
+    const ul = document.createElement("ul");
+    ul.className = "subtopics";
+    ul.append(...[...f.topics.values()].sort((a, b) => b.sets - a.sets).map((t) => topicRow(folderKey, t)));
+    li.append(ul);
+  }
+  return li;
+}
+
+function renderFolders() {
+  const folders = new Map();
+  for (const h of history) {
+    const f = folderOf(h);
+    const s = setScore(h);
+    const key = `${f.type}:${f.key}`;
+    const row = folders.get(key) || { ...f, sets: 0, correct: 0, answered: 0, topics: new Map() };
+    row.sets++;
+    row.correct += s.correct;
+    row.answered += s.answered;
+    const tk = h.topic.toLowerCase();
+    const t = row.topics.get(tk) || { key: tk, name: h.topic, sets: 0, correct: 0, answered: 0, sets_: [] };
+    t.sets++;
+    t.correct += s.correct;
+    t.answered += s.answered;
+    t.sets_.push(h); // history is newest first, so these stay in order
+    row.topics.set(tk, t);
+    folders.set(key, row);
+  }
+  // Classes the student made come first, even before they have practiced in them.
+  for (const c of courses) {
+    const key = `course:${c.id}`;
+    if (!folders.has(key)) {
+      folders.set(key, { type: "course", key: c.id, name: c.name, subject: c.subject || "other", sets: 0, correct: 0, answered: 0, topics: new Map() });
+    }
+  }
+  const rows = [...folders.values()].sort((a, b) => {
+    if ((a.type === "course") !== (b.type === "course")) return a.type === "course" ? -1 : 1;
+    return b.sets - a.sets || a.name.localeCompare(b.name);
+  });
+  if (openFolder === null) openFolder = rows.length ? `${rows[0].type}:${rows[0].key}` : "";
+  $("folders-wrap").hidden = rows.length === 0;
+  $("folders").replaceChildren(...rows.map(folderRow));
 }
 
 function renderHistory() {
+  renderInsight();
+  renderFolders();
   let correct = 0;
   let answered = 0;
-  const topics = new Map();
   for (const h of history) {
     const s = setScore(h);
     correct += s.correct;
     answered += s.answered;
-    const key = h.topic.toLowerCase();
-    const t = topics.get(key) || { name: h.topic, sets: 0, correct: 0, answered: 0 };
-    t.sets++;
-    t.correct += s.correct;
-    t.answered += s.answered;
-    topics.set(key, t);
   }
   $("stat-solved").textContent = correct;
   $("stat-accuracy").textContent = answered ? `${Math.round((100 * correct) / answered)}%` : "–";
   $("stat-streak").textContent = streak();
 
   $("history-empty").hidden = history.length > 0;
-  $("topics-wrap").hidden = topics.size === 0;
-  $("sets-wrap").hidden = history.length === 0;
   $("clear-history").hidden = history.length === 0;
   $("clear-history").textContent = "Clear history";
   delete $("clear-history").dataset.armed;
-
-  $("topics").replaceChildren(
-    ...[...topics.values()]
-      .sort((a, b) => b.sets - a.sets)
-      .map((t) => {
-        const li = document.createElement("li");
-        li.className = "topic-row";
-        const name = document.createElement("span");
-        name.className = "topic-name";
-        name.textContent = t.name;
-        const meta = document.createElement("span");
-        meta.className = "set-meta mono";
-        meta.textContent = `${t.sets} set${t.sets > 1 ? "s" : ""} · ${t.answered ? `${t.correct}/${t.answered} right` : "not tried"}`;
-        const bar = document.createElement("span");
-        bar.className = "topic-bar";
-        bar.style.setProperty("--p", t.answered ? t.correct / t.answered : 0);
-        bar.setAttribute("aria-hidden", "true");
-        li.append(name, meta, bar);
-        return li;
-      }),
-  );
-  $("sets").replaceChildren(...history.map(setRow));
   show("history");
 }
 
@@ -1383,7 +1985,9 @@ function openHistorySet(id) {
   const firstOpen = h.revealed.findIndex((r) => !r);
   Object.assign(state, {
     topic: h.topic,
-    difficulty: h.difficulty || state.difficulty,
+    subject: h.subject || "",
+    courseId: h.courseId || "",
+    difficulty: h.difficulty ?? state.difficulty,
     problems: [],
     expected: n,
     streaming: false,
@@ -1420,6 +2024,7 @@ async function clearHistory() {
   }
   pendingHistory.clear();
   history = [];
+  openFolder = null;
   await chrome.storage.local.set({ history });
   renderHistory();
 }
@@ -1430,7 +2035,8 @@ function renderVerbosity() {
   for (const b of $("verbosity").querySelectorAll("button")) {
     b.setAttribute("aria-checked", String(b.dataset.value === prefs.verbosity));
   }
-  $("verbosity-hint").textContent = `${VERBOSITY_HINTS[prefs.verbosity]} Applies to the next set you generate.`;
+  $("verbosity-hint").textContent = VERBOSITY_HINTS[prefs.verbosity];
+  renderCurrentSettings();
 }
 
 function openSettings() {
@@ -1487,17 +2093,28 @@ async function saveSettings() {
 
 // ---------------------------------------------------------------- focus mode
 
+// PracticeX has its own window now, so focus mode grows that window instead of opening a second one.
+const FOCUS_WIDTH = 860; // at this width the panel switches to the roomier focus layout
+
 async function toggleFocus() {
   if (FOCUS) {
-    window.close();
+    window.close(); // a focus window from an older version
     return;
   }
   save();
-  await chrome.windows.create({
-    url: chrome.runtime.getURL("panel.html?focus=1"),
-    type: "popup",
-    state: "fullscreen",
-  });
+  try {
+    const win = await chrome.windows.getCurrent();
+    const big = win.state === "fullscreen" || win.state === "maximized";
+    await chrome.windows.update(win.id, { state: big ? "normal" : "fullscreen" });
+  } catch {}
+}
+
+// The focus layout follows the window, however it got that big.
+function applyWindowSize() {
+  if (CROP) return;
+  const big = FOCUS || window.innerWidth >= FOCUS_WIDTH;
+  document.body.classList.toggle("focus", big);
+  $("toggle-focus").title = big ? "Leave focus mode" : "Focus mode";
 }
 
 // ---------------------------------------------------------------- boot
@@ -1505,10 +2122,12 @@ async function toggleFocus() {
 async function loadConfig() {
   try {
     config = await api("/v1/config");
+    renderUsage();
     notice("");
     return true;
   } catch (err) {
     config = null;
+    renderUsage();
     notice(describeError(err));
     return false;
   }
@@ -1520,11 +2139,23 @@ function bind() {
     state.model = e.target.value;
     save();
   });
-  $("difficulty").addEventListener("click", (e) => {
-    const value = e.target.closest("button")?.dataset.value;
-    if (!value) return;
-    state.difficulty = value;
-    renderStart();
+  $("difficulty").addEventListener("input", (e) => {
+    state.difficulty = Number(e.target.value);
+    applyDifficulty();
+    saveDifficulty();
+  });
+  // A settle at the end of the drag, not a bulge on every pixel of it.
+  $("difficulty").addEventListener("change", () => applyDifficulty({ animate: true }));
+  $("answer-mix").addEventListener("input", (e) => {
+    prefs.answerMix = Number(e.target.value);
+    applyAnswers();
+    savePrefs();
+  });
+  $("answer-mix").addEventListener("change", () => applyAnswers({ animate: true }));
+  $("slider-pick").addEventListener("change", (e) => {
+    prefs.slider = e.target.value;
+    savePrefs();
+    renderSliderPick();
   });
   $("count").addEventListener("input", (e) => {
     prefs.count = Number(e.target.value);
@@ -1534,6 +2165,7 @@ function bind() {
 
   let resizeTimer;
   window.addEventListener("resize", () => {
+    applyWindowSize();
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => fitInlineMath(document.body), 150);
   });
@@ -1551,7 +2183,6 @@ function bind() {
     savePrefs();
   });
   $("toggle-focus").addEventListener("click", toggleFocus);
-  $("toggle-focus").title = FOCUS ? "Exit focus mode (Esc)" : "Focus mode";
   if (FOCUS || CROP) {
     document.addEventListener("keydown", (e) => {
       if (["INPUT", "SELECT"].includes(document.activeElement?.tagName)) return;
@@ -1600,6 +2231,12 @@ function bind() {
     const value = e.target.closest("button")?.dataset.value;
     if (value) moreLikeThese(value);
   });
+  $("classes").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") openAddClass(false);
+  });
+  $("edit-classes").addEventListener("click", toggleEditClasses);
+  $("add-class").addEventListener("submit", addClass);
+  $("cancel-class").addEventListener("click", () => openAddClass(false));
   $("open-history").addEventListener("click", () => (state.view === "history" ? closeHistory() : openHistory()));
   $("history-back").addEventListener("click", closeHistory);
   $("recent-all").addEventListener("click", openHistory);
@@ -1624,11 +2261,14 @@ async function initCropWindow() {
 }
 
 async function init() {
-  document.body.classList.toggle("focus", FOCUS);
   bind();
+  applyWindowSize();
   await loadStorage();
   applyTextScale();
+  applyDifficulty();
   applyCount();
+  applyAnswers();
+  renderVerbosity();
   if (CROP) {
     await initCropWindow();
     return;

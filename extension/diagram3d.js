@@ -1,4 +1,6 @@
-// Draws a "space_3d" diagram as SVG the student can rotate by dragging.
+import { controlBar } from "./diagram-ui.js";
+
+// Draws a "space_3d" diagram as SVG the student can rotate by dragging and zoom in on.
 // Orthographic projection, z up, painter's algorithm for depth. The spec is data only; labels go in via
 // textContent.
 
@@ -9,9 +11,9 @@ const MARGIN = 26;
 const DEFAULT_YAW = (-125 * Math.PI) / 180; // x toward the viewer and left, y to the right
 const DEFAULT_PITCH = (24 * Math.PI) / 180;
 const COLORS = {
-  main: "var(--studyx-peach)",
-  secondary: "var(--studyx-fog)",
-  faint: "var(--studyx-cloud)",
+  main: "var(--practicex-peach)",
+  secondary: "var(--practicex-fog)",
+  faint: "var(--practicex-cloud)",
 };
 // Surface shading runs from cloud (low) to peach (high); these are the brand tokens as RGB.
 const LOW = [0x5a, 0x6e, 0x86];
@@ -89,10 +91,10 @@ export function render3D(d) {
     class: "diagram space",
     role: "img",
     tabindex: "0",
-    "aria-label": "3D diagram. Drag or use the arrow keys to rotate; double-click to reset.",
+    "aria-label": "3D diagram. Drag or use the arrow keys to rotate, + and − to zoom, double-click to reset.",
   });
   const defs = el("defs", {}, svg);
-  for (const [name, color] of Object.entries({ ...COLORS, axis: "var(--studyx-mist)" })) {
+  for (const [name, color] of Object.entries({ ...COLORS, axis: "var(--practicex-mist)" })) {
     const m = el("marker", { id: `${id}-${name}`, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
     el("path", { d: "M0 0 L10 5 L0 10 z", style: `fill:${color}` }, m);
   }
@@ -100,13 +102,25 @@ export function render3D(d) {
   el("stop", { offset: "0%", "stop-color": "#FFD9C2", "stop-opacity": "0.55" }, sphereFill);
   el("stop", { offset: "100%", "stop-color": "#5A6E86", "stop-opacity": "0.25" }, sphereFill);
   const scene = el("g", {}, svg);
-  const hint = document.createElement("p");
-  hint.className = "diagram-hint mono";
-  hint.textContent = "Drag to rotate · double-click to reset";
-  wrap.append(svg, hint);
-
   let yaw = DEFAULT_YAW;
   let pitch = DEFAULT_PITCH;
+  let zoom = 1;
+  const MAX_ZOOM = 5;
+  const zoomBy = (factor) => {
+    zoom = Math.max(1, Math.min(MAX_ZOOM, zoom * factor));
+    redraw();
+  };
+  const { bar } = controlBar({
+    onZoom: zoomBy,
+    onReset: () => {
+      yaw = DEFAULT_YAW;
+      pitch = DEFAULT_PITCH;
+      zoom = 1;
+      redraw();
+    },
+    hint: "Drag to rotate",
+  });
+  wrap.append(svg, bar);
 
   function draw() {
     const cy = Math.cos(yaw);
@@ -118,7 +132,8 @@ export function render3D(d) {
       const [x, y, z] = N(p);
       const u = x * cy - y * sy;
       const v = x * sy + y * cy;
-      return { X: W / 2 + u * S, Y: H / 2 - (z * cp + v * sp) * S, d: -v * cp + z * sp };
+      const Z = S * zoom;
+      return { X: W / 2 + u * Z, Y: H / 2 - (z * cp + v * sp) * Z, d: -v * cp + z * sp };
     };
     const items = []; // { d, node }
     const labels = [];
@@ -185,7 +200,7 @@ export function render3D(d) {
       const p = e.points;
       if (e.kind === "point") {
         const q = project(p[0]);
-        items.push({ d: q.d + 0.02, node: el("circle", { cx: q.X, cy: q.Y, r: 4.5, class: "dot", style: `stroke:${color};fill:${e.dashed ? "var(--studyx-slate-raised)" : color}` }) });
+        items.push({ d: q.d + 0.02, node: el("circle", { cx: q.X, cy: q.Y, r: 4.5, class: "dot", style: `stroke:${color};fill:${e.dashed ? "var(--practicex-slate-raised)" : color}` }) });
         addLabel(e.label, p[0]);
       } else if ((e.kind === "vector" || e.kind === "segment") && p.length >= 2) {
         const attrs = { ...stroke };
@@ -220,7 +235,7 @@ export function render3D(d) {
         addLabel(e.label, c, 0, 0);
       } else if (e.kind === "sphere" && e.radius) {
         const q = project(p[0]);
-        const r = e.radius * (scale[0] + scale[1] + scale[2]) / 3 * S;
+        const r = ((e.radius * (scale[0] + scale[1] + scale[2])) / 3) * S * zoom;
         items.push({ d: q.d, node: el("circle", { cx: q.X, cy: q.Y, r, class: "sphere", style: `stroke:${color};fill:url(#${id}-sphere)` }) });
         addLabel(e.label, p[0].map((v, i) => (i === 2 ? v + e.radius : v)), 6, -6);
       } else if (e.kind === "surface" && e.grid_cols >= 2) {
@@ -306,14 +321,28 @@ export function render3D(d) {
   svg.addEventListener("dblclick", () => {
     yaw = DEFAULT_YAW;
     pitch = DEFAULT_PITCH;
+    zoom = 1;
     redraw();
   });
+  // Pinch on a trackpad arrives as ctrl+wheel; a plain wheel still scrolls the panel.
+  svg.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      zoomBy(Math.exp(-e.deltaY * 0.012));
+    },
+    { passive: false },
+  );
   svg.addEventListener("keydown", (e) => {
     const step = 0.14;
     if (e.key === "ArrowLeft") yaw -= step;
     else if (e.key === "ArrowRight") yaw += step;
     else if (e.key === "ArrowUp") pitch = clampPitch(pitch - step);
     else if (e.key === "ArrowDown") pitch = clampPitch(pitch + step);
+    else if (e.key === "+" || e.key === "=") zoomBy(1.4);
+    else if (e.key === "-" || e.key === "_") zoomBy(1 / 1.4);
+    else if (e.key === "0") zoom = 1;
     else return;
     e.preventDefault();
     redraw();

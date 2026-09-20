@@ -18,10 +18,11 @@ import llm  # noqa: E402
 IMAGE = base64.b64encode(b"\xff\xd8\xff fake jpeg").decode()
 
 
-def fake_generate(model, image, media_type, difficulty, count, verbosity):
+def fake_generate(model, image, media_type, difficulty, count, verbosity, answer_format="free", answer_mix=50):
     yield '{"readable": '
     yield "true}"
     return {"readable": True, "topic": "Linear equations", "count": count, "verbosity": verbosity,
+            "answer_format": answer_format, "answer_mix": answer_mix, "difficulty": difficulty,
             "problems": [{"question": "Solve", "answer": "4", "steps": []}]}
 
 
@@ -62,9 +63,9 @@ class ServerTest(unittest.TestCase):
         app.limiter = app.HourlyLimiter()
 
     def call(self, path, body=None, install="test-install-0000001", founder=None):
-        headers = {"X-StudyX-Install": install, "Origin": "chrome-extension://abc"}
+        headers = {"X-PracticeX-Install": install, "Origin": "chrome-extension://abc"}
         if founder:
-            headers["X-StudyX-Founder"] = founder
+            headers["X-PracticeX-Founder"] = founder
         data = None
         if body is not None:
             data = json.dumps(body).encode()
@@ -88,6 +89,34 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(data["default_model"], "gpt-5.6-luna")
         self.assertEqual(data["usage"], {"used": 0, "limit": 3, "resets_at": None})
         self.assertEqual(headers["Access-Control-Allow-Origin"], "chrome-extension://abc")
+
+    def test_difficulty_is_a_level_and_old_words_still_work(self):
+        for sent, expected in [(0, 0), (73, 73), (100, 100), (140, 100), (-3, 0),
+                               ("easier", 25), ("same", 50), ("harder", 75), ("junk", 50), (None, 50)]:
+            app.limiter = app.HourlyLimiter()  # more cases here than the test cap allows
+            _, data, _ = self.call(
+                "/v1/generate", {"image": IMAGE, "media_type": "image/jpeg", "difficulty": sent}
+            )
+            self.assertEqual(data["difficulty"], expected, sent)
+
+    def test_health_needs_no_install_id(self):
+        req = urllib.request.Request(self.base + "/healthz")
+        with urllib.request.urlopen(req) as res:
+            self.assertEqual(json.loads(res.read())["ok"], True)
+
+    def test_cors_only_for_the_named_extension_when_one_is_set(self):
+        app.ALLOWED_EXTENSION_IDS = {"abc"}
+        try:
+            _, _, headers = self.call("/v1/config")  # Origin: chrome-extension://abc
+            self.assertEqual(headers["Access-Control-Allow-Origin"], "chrome-extension://abc")
+            req = urllib.request.Request(
+                self.base + "/v1/config",
+                headers={"X-PracticeX-Install": "test-install-0000001", "Origin": "chrome-extension://other"},
+            )
+            with urllib.request.urlopen(req) as res:
+                self.assertIsNone(res.headers["Access-Control-Allow-Origin"])
+        finally:
+            app.ALLOWED_EXTENSION_IDS = set()
 
     def test_config_founder(self):
         _, data, _ = self.call("/v1/config", founder="founder-secret")
@@ -133,6 +162,52 @@ class ServerTest(unittest.TestCase):
         _, data, _ = self.call("/v1/check", {"question": "Solve", "answer": "4", "attempt": "5"})
         self.assertEqual(data["verdict"], "incorrect")
         status, _, _ = self.call("/v1/check", {"question": "Solve", "answer": "4", "attempt": "   "})
+        self.assertEqual(status, 400)
+
+    def test_answer_format(self):
+        for sent, expected in [("multiple_choice", "multiple_choice"), ("free", "free"), ("mixed", "mixed"),
+                               ("quiz", "free"), (None, "free")]:
+            _, data, _ = self.call("/v1/generate", {"image": IMAGE, "media_type": "image/jpeg", "answer_format": sent})
+            self.assertEqual(data["answer_format"], expected, sent)
+            app.limiter = app.HourlyLimiter()
+
+    def test_multiple_choice_shaping(self):
+        def shaped(fmt, options, correct):
+            data = {"readable": True, "subject": "math", "topic": "t",
+                    "problems": [{"question": "q", "answer": "6", "diagram_useful": False,
+                                  "options": options, "correct_option": correct}]}
+            p = llm.shape_generated(data, 3, fmt)["problems"][0]
+            return p["options"], p["correct_option"]
+        self.assertEqual(shaped("multiple_choice", ["4", "5", "6", "7"], 2), (["4", "5", "6", "7"], 2))
+        # A written-answer set never carries options, and unusable options fall back to a written answer.
+        self.assertEqual(shaped("free", ["4", "5", "6", "7"], 2), ([], None))
+        self.assertEqual(shaped("multiple_choice", ["9"], 0), ([], None))
+        self.assertEqual(shaped("multiple_choice", ["8", "9"], 5), ([], None))
+        self.assertEqual(shaped("multiple_choice", ["8", "9"], True), ([], None))
+        # A mixed set keeps the options the model supplied and writes out the ones it left bare.
+        self.assertEqual(shaped("mixed", ["4", "5", "6", "7"], 2), (["4", "5", "6", "7"], 2))
+        self.assertEqual(shaped("mixed", [], None), ([], None))
+
+    def test_answer_mix_share(self):
+        for mix, expected in [(0, 99), (25, 75), (50, 50), (100, 1)]:
+            self.assertIn(f"{expected}%", llm.format_rule("mixed", mix))
+        self.assertNotIn("{share}", llm.format_rule("free", 50))
+
+    def test_diagram_rules_by_subject(self):
+        fig = {"kind": "geometry", "x_min": 0, "x_max": 1, "y_min": 0, "y_max": 1,
+               "elements": [{"kind": "point", "points": [[0.5, 0.5]]}]}
+        def shaped(subject, useful):
+            data = {"readable": True, "subject": subject, "topic": "t",
+                    "problems": [{"question": "q", "answer": "a", "diagram_useful": useful, "diagram": fig}]}
+            return llm.shape_generated(data, 3)
+        self.assertIsNotNone(shaped("math", True)["problems"][0]["diagram"])
+        # The model said no (e.g. simple addition): the figure it sent anyway is dropped.
+        self.assertEqual(shaped("math", False)["problems"][0], {**shaped("math", False)["problems"][0], "diagram_useful": False, "diagram": None})
+        for subject in ("writing", "language", "history"):
+            p = shaped(subject, True)["problems"][0]
+            self.assertEqual((p["diagram_useful"], p["diagram"]), (False, None), subject)
+        self.assertEqual(shaped("astrology", True)["subject"], "other")
+        status, _, _ = self.call("/v1/diagram", {"question": "Fix the comma", "subject": "writing"})
         self.assertEqual(status, 400)
 
     def test_diagram_cleaning(self):

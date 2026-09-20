@@ -1,0 +1,29 @@
+# Render blueprint for the PracticeX server.
+# Create the service with: Render dashboard -> New -> Blueprint -> pick this repo.
+# The values marked sync: false are typed into the dashboard, never committed.
+services:
+  - type: web
+    name: practicex-server
+    runtime: python
+    plan: free # sleeps when idle, so the first request after a quiet spell is slow; starter avoids that
+    rootDir: server
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: HOST
+        value: 0.0.0.0 # Render routes to the port it gives us; PORT is set for us
+      - key: TRUST_PROXY
+        value: "1" # read the client IP from X-Forwarded-For, so the per-IP cap is real
+      - key: HOURLY_CAP
+        value: "50"
+      - key: GLOBAL_HOURLY_CAP
+        value: "600"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: FOUNDER_TOKEN
+        sync: false
+      - key: ALLOWED_EXTENSION_IDS
+        sync: false # the packed extension's id, so only it gets CORS

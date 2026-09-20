@@ -99,12 +99,27 @@ def _titled(step):
     return {"title": "Work it through", "detail": step}
 
 
-def generate(model, image, media_type, difficulty, count, verbosity="standard"):
+DISTRACTORS = [r"\(0\)", r"\(-1\)", r"\(\tfrac{1}{2}\)", r"None of these numbers", r"\(2x\)"]
+
+
+def _choices(problem, k):
+    """Builds throwaway options around the real answer, with the correct one in a different spot each time."""
+    correct = k % 4
+    options = [d for d in DISTRACTORS if d != problem["answer"]][:3]
+    options.insert(correct, problem["answer"])
+    return {**problem, "options": options, "correct_option": correct}
+
+
+def generate(model, image, media_type, difficulty, count, verbosity="standard", answer_format="free"):
     time.sleep(1.0)  # "reading the problem"
-    problems = [{**p, "steps": [_titled(s) for s in p["steps"]]} for p in PROBLEMS[:count]]
-    data = {"readable": True, "topic": "Mixed practice", "problems": problems}
+    # The last canned problem is routine algebra: the model would rate a figure as not useful.
+    problems = [{**p, "steps": [_titled(s) for s in p["steps"]], "diagram_useful": p["diagram"] is not None}
+                for p in PROBLEMS[:count]]
+    if answer_format == "multiple_choice":
+        problems = [_choices(p, k) for k, p in enumerate(problems)]
+    data = {"readable": True, "subject": "math", "topic": "Mixed practice", "problems": problems}
     yield from _type_out(data)
-    return {**data, "problems": [{**p, "diagram": llm._clean_diagram(p["diagram"])} for p in data["problems"]]}
+    return llm.shape_generated(data, count, answer_format)
 
 
 def el3(kind, points, label=None, emphasis="main", radius=None, grid_cols=None, dashed=False):
@@ -183,5 +198,5 @@ llm.generate = generate
 llm.prerequisite = prerequisite
 llm.diagram = diagram
 llm.check = check
-print(f"fake StudyX server on http://localhost:{app.PORT}")
+print(f"fake PracticeX server on http://localhost:{app.PORT}")
 ThreadingHTTPServer(("127.0.0.1", app.PORT), app.Handler).serve_forever()

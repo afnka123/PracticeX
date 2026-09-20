@@ -1,13 +1,14 @@
 import { render3D } from "./diagram3d.js";
+import { controlBar } from "./diagram-ui.js";
 
 // Draws the model's diagram spec as SVG. The spec is data only; every label goes in via textContent.
 
 const NS = "http://www.w3.org/2000/svg";
 const PAD = 24;
 const COLORS = {
-  main: "var(--studyx-peach)",
-  secondary: "var(--studyx-fog)",
-  faint: "var(--studyx-cloud)",
+  main: "var(--practicex-peach)",
+  secondary: "var(--practicex-fog)",
+  faint: "var(--practicex-cloud)",
 };
 
 let uid = 0;
@@ -28,6 +29,11 @@ function niceStep(range, target) {
 
 function fmt(n) {
   return String(Math.round(n * 1000) / 1000).replace("-", "−");
+}
+
+// A crossing is only as exact as the drawing it was read off, so it is not quoted to more than this.
+function fmtRead(n) {
+  return String(Math.round(n * 100) / 100).replace("-", "−");
 }
 
 const FLAT = ["point", "vector", "segment", "line", "ray", "polygon", "circle", "curve", "angle", "text"];
@@ -91,6 +97,83 @@ export function cleanDiagram(d) {
   };
 }
 
+// Where two straight pieces cross, in data coordinates. Endpoints count; parallels do not.
+function crossing(a, b) {
+  const [p, q] = a;
+  const [r, t] = b;
+  const d1 = [q[0] - p[0], q[1] - p[1]];
+  const d2 = [t[0] - r[0], t[1] - r[1]];
+  const den = d1[0] * d2[1] - d1[1] * d2[0];
+  if (Math.abs(den) < 1e-12) return null; // parallel, or a piece with no length
+  const u = ((r[0] - p[0]) * d2[1] - (r[1] - p[1]) * d2[0]) / den;
+  const v = ((r[0] - p[0]) * d1[1] - (r[1] - p[1]) * d1[0]) / den;
+  const eps = 1e-9;
+  if (u < -eps || u > 1 + eps || v < -eps || v > 1 + eps) return null;
+  return [p[0] + d1[0] * u, p[1] + d1[1] * u];
+}
+
+// Every point worth reading off: the ones the model marked, the corners and ends of what it drew,
+// and wherever two of its pieces cross. The axes count as pieces, so intercepts are included.
+function readablePoints(d, numberLine) {
+  const pts = [];
+  const segs = []; // { seg: [[x,y],[x,y]], from: element index }
+  const xr = d.x_max - d.x_min;
+  const yr = d.y_max - d.y_min;
+  const add = (p, label, crossed) => {
+    if (Array.isArray(p) && finite(p[0]) && finite(p[1])) pts.push({ x: p[0], y: p[1], label: label || null, crossed });
+  };
+  d.elements.forEach((e, k) => {
+    const p = e.points;
+    const line = (a, b) => segs.push({ seg: [a, b], from: k });
+    if (e.kind === "point") add(p[0], e.label, false);
+    else if ((e.kind === "segment" || e.kind === "vector") && p.length >= 2) {
+      add(p[0], null, false);
+      add(p[1], e.label, false);
+      line(p[0], p[1]);
+    } else if ((e.kind === "line" || e.kind === "ray") && p.length >= 2) {
+      const [dx, dy] = [p[1][0] - p[0][0], p[1][1] - p[0][1]];
+      const far = ((xr + yr) * 4) / (Math.hypot(dx, dy) || 1);
+      const start = e.kind === "line" ? [p[0][0] - dx * far, p[0][1] - dy * far] : p[0];
+      if (e.kind === "ray") add(p[0], null, false);
+      line(start, [p[0][0] + dx * far, p[0][1] + dy * far]);
+    } else if (e.kind === "polygon" && p.length >= 3) {
+      p.forEach((q) => add(q, null, false));
+      p.forEach((q, i) => line(q, p[(i + 1) % p.length]));
+    } else if (e.kind === "curve" && p.length >= 2) {
+      add(p[0], null, false);
+      add(p[p.length - 1], e.label, false);
+      for (let i = 1; i < p.length; i++) line(p[i - 1], p[i]);
+    } else if (e.kind === "circle" && p[0]) {
+      add(p[0], e.label, false);
+    }
+  });
+  if (!numberLine) {
+    if (d.y_min <= 0 && d.y_max >= 0) segs.push({ seg: [[d.x_min, 0], [d.x_max, 0]], from: -1 });
+    if (d.x_min <= 0 && d.x_max >= 0) segs.push({ seg: [[0, d.y_min], [0, d.y_max]], from: -2 });
+  }
+  // Only across different elements: the joints inside one polygon or curve are not crossings.
+  const list = segs.slice(0, 1600);
+  for (let i = 0; i < list.length && pts.length < 200; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      if (list[i].from === list[j].from) continue;
+      const hit = crossing(list[i].seg, list[j].seg);
+      if (hit) add(hit, null, true);
+    }
+  }
+
+  const tol = Math.max(xr, yr) / 2000;
+  const seen = new Map();
+  for (const pt of pts) {
+    if (pt.x < d.x_min - tol || pt.x > d.x_max + tol) continue;
+    if (!numberLine && (pt.y < d.y_min - tol || pt.y > d.y_max + tol)) continue;
+    const key = `${Math.round(pt.x / tol)}:${Math.round(numberLine ? 0 : pt.y / tol)}`;
+    const old = seen.get(key);
+    // A marked point beats a bare crossing at the same spot, and a label beats no label.
+    if (!old || (old.crossed && !pt.crossed) || (!old.label && pt.label)) seen.set(key, { ...old, ...pt });
+  }
+  return [...seen.values()].slice(0, 40);
+}
+
 export function renderDiagram(raw) {
   const d = cleanDiagram(raw);
   if (!d) return null;
@@ -106,14 +189,20 @@ export function renderDiagram(raw) {
   const X = (x) => PAD + (x - d.x_min) * s;
   const Y = numberLine ? () => h / 2 : (y) => PAD + (d.y_max - y) * s;
 
-  const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, class: numberLine ? "diagram numberline" : "diagram", role: "img", "aria-label": "Diagram for the question" });
+  const svg = el("svg", {
+    viewBox: `0 0 ${w} ${h}`,
+    class: numberLine ? "diagram numberline" : "diagram",
+    role: "img",
+    tabindex: "0",
+    "aria-label": "Diagram for the question. Click a marked point to read its value; + and − zoom.",
+  });
   const defs = el("defs", {}, svg);
   for (const [name, color] of Object.entries(COLORS)) {
     const m = el("marker", { id: `${id}-${name}`, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
     el("path", { d: "M0 0 L10 5 L0 10 z", style: `fill:${color}` }, m);
   }
   const axisMarker = el("marker", { id: `${id}-axis`, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" }, defs);
-  el("path", { d: "M0 0 L10 5 L0 10 z", style: "fill:var(--studyx-mist)" }, axisMarker);
+  el("path", { d: "M0 0 L10 5 L0 10 z", style: "fill:var(--practicex-mist)" }, axisMarker);
   const clip = el("clipPath", { id: `${id}-clip` }, defs);
   el("rect", { x: PAD - 6, y: numberLine ? 0 : PAD - 6, width: xr * s + 12, height: numberLine ? h : yr * s + 12 }, clip);
 
@@ -177,7 +266,7 @@ export function renderDiagram(raw) {
     const p = e.points;
     if (e.kind === "point" && p[0]) {
       const open = e.dashed;
-      el("circle", { cx: X(p[0][0]), cy: Y(p[0][1]), r: 4.5, style: `stroke:${color};fill:${open ? "var(--studyx-slate-raised)" : color}`, class: "dot" }, labels);
+      el("circle", { cx: X(p[0][0]), cy: Y(p[0][1]), r: 4.5, style: `stroke:${color};fill:${open ? "var(--practicex-slate-raised)" : color}`, class: "dot" }, labels);
       label(e.label, X(p[0][0]) + 10, Y(p[0][1]) - (numberLine ? 16 : 10), numberLine ? "middle" : "start");
     } else if ((e.kind === "vector" || e.kind === "segment") && p.length >= 2) {
       const line = el("line", { x1: X(p[0][0]), y1: Y(p[0][1]), x2: X(p[1][0]), y2: Y(p[1][1]), ...stroke }, shapes);
@@ -224,5 +313,129 @@ export function renderDiagram(raw) {
       label(e.label, X(p[0][0]), Y(p[0][1]));
     }
   }
-  return svg;
+
+  // ---- what the student can do with it -------------------------------------------------------
+
+  const wrap = document.createElement("div");
+  wrap.className = "diagram2d";
+  const base = { x: 0, y: 0, w, h };
+  const view = { ...base };
+  const MAX_ZOOM = 6;
+
+  const applyView = () => {
+    view.x = Math.max(base.x, Math.min(base.x + base.w - view.w, view.x));
+    view.y = Math.max(base.y, Math.min(base.y + base.h - view.h, view.y));
+    svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+    wrap.classList.toggle("zoomed", view.w < base.w - 0.5);
+    // Points and labels stay their own size, so zooming reveals detail instead of magnifying ink.
+    svg.style.setProperty("--dz", base.w / view.w);
+  };
+  const zoomBy = (factor, cx = view.x + view.w / 2, cy = view.y + view.h / 2) => {
+    const next = Math.max(base.w / MAX_ZOOM, Math.min(base.w, view.w / factor));
+    const k = next / view.w;
+    view.x = cx - (cx - view.x) * k;
+    view.y = cy - (cy - view.y) * k;
+    view.w = next;
+    view.h = base.h * (next / base.w);
+    applyView();
+  };
+  const resetView = () => {
+    Object.assign(view, base);
+    applyView();
+    select(null);
+  };
+
+  const readable = readablePoints(d, numberLine);
+  const { bar, say } = controlBar({
+    onZoom: (f) => zoomBy(f),
+    onReset: resetView,
+    hint: readable.length ? "Click a point to read it" : "Pinch or use + to zoom",
+  });
+
+  const hits = el("g", { class: "hits" }, svg);
+  let chosen = null;
+  function select(node, pt) {
+    if (chosen) chosen.classList.remove("on");
+    chosen = node && node !== chosen ? node : null;
+    if (!chosen) return say("");
+    chosen.classList.add("on");
+    const f = pt.crossed ? fmtRead : fmt;
+    const where = numberLine ? `x = ${f(pt.x)}` : `(${f(pt.x)}, ${f(pt.y)})`;
+    say([pt.label, pt.crossed && !pt.label ? `crosses at about ${where}` : where].filter(Boolean).join(" · "));
+  }
+
+  for (const pt of readable) {
+    const g = el("g", { class: `hit${pt.crossed ? " crossed" : ""}`, tabindex: "0", role: "button" }, hits);
+    const [cx, cy] = [X(pt.x), Y(pt.y)];
+    el("circle", { cx, cy, r: 4, class: "hit-dot" }, g);
+    el("circle", { cx, cy, r: 13, class: "hit-area" }, g);
+    const f = pt.crossed ? fmtRead : fmt;
+    const where = numberLine ? `x = ${f(pt.x)}` : `${f(pt.x)}, ${f(pt.y)}`;
+    g.setAttribute("aria-label", [pt.label, pt.crossed ? `crossing at about ${where}` : where].filter(Boolean).join(", "));
+    const pick = (e) => {
+      e.stopPropagation();
+      select(g, pt);
+    };
+    g.addEventListener("click", pick);
+    g.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      pick(e);
+    });
+  }
+
+  // Pinch on a trackpad arrives as ctrl+wheel. A plain wheel still scrolls the panel.
+  svg.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const r = svg.getBoundingClientRect();
+      zoomBy(
+        Math.exp(-e.deltaY * 0.012),
+        view.x + ((e.clientX - r.left) / r.width) * view.w,
+        view.y + ((e.clientY - r.top) / r.height) * view.h,
+      );
+    },
+    { passive: false },
+  );
+
+  let pan = null;
+  svg.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".hit")) return;
+    if (view.w >= base.w - 0.5) return select(null); // not zoomed in: a click on the paper just clears
+    svg.setPointerCapture(e.pointerId);
+    pan = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, r: svg.getBoundingClientRect() };
+    wrap.classList.add("panning");
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (!pan) return;
+    view.x = pan.vx - ((e.clientX - pan.x) / pan.r.width) * view.w;
+    view.y = pan.vy - ((e.clientY - pan.y) / pan.r.height) * view.h;
+    applyView();
+  });
+  const endPan = () => {
+    pan = null;
+    wrap.classList.remove("panning");
+  };
+  svg.addEventListener("pointerup", endPan);
+  svg.addEventListener("pointercancel", endPan);
+  svg.addEventListener("dblclick", resetView);
+  svg.addEventListener("keydown", (e) => {
+    const step = view.w / 8;
+    if (e.key === "+" || e.key === "=") zoomBy(1.4);
+    else if (e.key === "-" || e.key === "_") zoomBy(1 / 1.4);
+    else if (e.key === "0") resetView();
+    else if (e.key === "ArrowLeft") view.x -= step;
+    else if (e.key === "ArrowRight") view.x += step;
+    else if (e.key === "ArrowUp") view.y -= step;
+    else if (e.key === "ArrowDown") view.y += step;
+    else return;
+    e.preventDefault();
+    applyView();
+  });
+
+  applyView();
+  wrap.append(svg, bar);
+  return wrap;
 }

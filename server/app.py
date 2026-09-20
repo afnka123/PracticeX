@@ -1,4 +1,4 @@
-"""StudyX backend.
+"""PracticeX backend.
 
 Holds the API keys and enforces the hourly cap, so neither ships inside the extension.
 Run: .venv/bin/python app.py   (reads settings from environment or a .env file next to this one)
@@ -36,18 +36,22 @@ import llm  # noqa: E402  (after .env so the SDK clients see the keys)
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8787"))
-HOURLY_CAP = int(os.environ.get("HOURLY_CAP", "20"))
+HOURLY_CAP = int(os.environ.get("HOURLY_CAP", "50"))
 FOUNDER_HOURLY_CAP = int(os.environ.get("FOUNDER_HOURLY_CAP", "200"))
 # Per-IP cap stops one machine from rotating install ids to dodge the per-user cap.
 IP_HOURLY_CAP = int(os.environ.get("IP_HOURLY_CAP", str(HOURLY_CAP * 3)))
 # Ceiling across all users, as a last line of defence for the API bill.
 GLOBAL_HOURLY_CAP = int(os.environ.get("GLOBAL_HOURLY_CAP", "600"))
 FOUNDER_TOKEN = os.environ.get("FOUNDER_TOKEN", "")
+# In production, set this to the packed extension's id (comma-separated for more than one) so only
+# that extension gets CORS. Left empty, any extension and localhost may call the server.
+ALLOWED_EXTENSION_IDS = {i.strip() for i in os.environ.get("ALLOWED_EXTENSION_IDS", "").split(",") if i.strip()}
 # Reports have their own small budget: they cost no model call, but each one is written to disk.
 REPORT_HOURLY_CAP = int(os.environ.get("REPORT_HOURLY_CAP", "10"))
 MAX_BODY = 8 * 1024 * 1024
 
-REPORTS_FILE = HERE / "reports.jsonl"
+# Hosts with an ephemeral disk can point this at a mounted one.
+REPORTS_FILE = Path(os.environ.get("REPORTS_FILE", HERE / "reports.jsonl"))
 INSTALL_ID_RE = re.compile(r"^[A-Za-z0-9-]{16,64}$")
 
 
@@ -109,7 +113,7 @@ class ApiError(Exception):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "StudyX/1"
+    server_version = "PracticeX/1"
 
     # --- plumbing -------------------------------------------------------
 
@@ -122,14 +126,21 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _allowed_origin(self, origin):
+        if origin.startswith("chrome-extension://"):
+            return not ALLOWED_EXTENSION_IDS or origin.split("//", 1)[1] in ALLOWED_EXTENSION_IDS
+        # The dev preview runs on localhost; a deployment that names its extension does not need it.
+        return origin.startswith("http://localhost") and not ALLOWED_EXTENSION_IDS
+
     def _cors(self):
         origin = self.headers.get("Origin", "")
-        if origin.startswith("chrome-extension://") or origin.startswith("http://localhost"):
+        if origin and self._allowed_origin(origin):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header(
-                "Access-Control-Allow-Headers", "Content-Type, X-StudyX-Install, X-StudyX-Founder"
+                "Access-Control-Allow-Headers",
+                "Content-Type, X-PracticeX-Install, X-PracticeX-Founder, X-StudyX-Install, X-StudyX-Founder"
             )
 
     def do_OPTIONS(self):
@@ -138,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        self._dispatch({"/v1/config": self.get_config})
+        self._dispatch({"/v1/config": self.get_config, "/healthz": self.get_health})
 
     def do_POST(self):
         self._dispatch(
@@ -226,13 +237,15 @@ class Handler(BaseHTTPRequestHandler):
     # --- identity and limits ---------------------------------------------
 
     def _install_id(self):
-        install = self.headers.get("X-StudyX-Install", "")
+        # X-StudyX-* is the pre-rename name of these headers: an extension that has not been reloaded
+        # yet still sends it. Drop the fallback once every client is on a build that sends the new one.
+        install = self.headers.get("X-PracticeX-Install") or self.headers.get("X-StudyX-Install", "")
         if not INSTALL_ID_RE.match(install):
             raise ApiError(400, "Missing install id. Reload the extension.")
         return install
 
     def _is_founder(self):
-        token = self.headers.get("X-StudyX-Founder", "")
+        token = self.headers.get("X-PracticeX-Founder") or self.headers.get("X-StudyX-Founder", "")
         return bool(FOUNDER_TOKEN) and hmac.compare_digest(token, FOUNDER_TOKEN)
 
     def _ip(self):
@@ -255,7 +268,7 @@ class Handler(BaseHTTPRequestHandler):
         ok, key, resets_at = limiter.try_take(checks)
         if not ok:
             if key == "global":
-                raise ApiError(429, "StudyX is at capacity this hour.", resets_at=resets_at)
+                raise ApiError(429, "PracticeX is at capacity this hour.", resets_at=resets_at)
             raise ApiError(429, "Hourly limit reached.", resets_at=resets_at, usage=self._usage(install))
 
     @staticmethod
@@ -278,6 +291,10 @@ class Handler(BaseHTTPRequestHandler):
         return allowed[0]
 
     # --- routes ----------------------------------------------------------
+
+    # Uptime check for the host. It touches nothing and needs no install id.
+    def get_health(self):
+        return {"ok": True, "models": len(MODELS)}
 
     def get_config(self):
         install = self._install_id()
@@ -303,17 +320,22 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "Screenshot could not be read.")
         if not image:
             raise ApiError(400, "Screenshot is empty.")
-        difficulty = body.get("difficulty", "same")
-        if difficulty not in llm.DIFFICULTY:
-            difficulty = "same"
+        difficulty = llm.difficulty_level(body.get("difficulty", 50))
         verbosity = self._verbosity(body)
+        answer_format = body.get("answer_format", "free")
+        if answer_format not in llm.FORMATS:
+            answer_format = "free"
+        answer_mix = body.get("answer_mix", 50)
+        if not isinstance(answer_mix, (int, float)) or isinstance(answer_mix, bool):
+            answer_mix = 50
+        answer_mix = max(0, min(100, answer_mix))
         count = body.get("count", 3)
         if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= llm.MAX_PROBLEMS:
             count = 3
         model = self._model(body.get("model", ""))
 
         self._spend_one(install)
-        self._stream(install, llm.generate(model, image, media_type, difficulty, count, verbosity), {"model": model["id"]})
+        self._stream(install, llm.generate(model, image, media_type, difficulty, count, verbosity, answer_format, answer_mix), {"model": model["id"]})
 
     def post_prerequisite(self):
         install = self._install_id()
@@ -335,6 +357,8 @@ class Handler(BaseHTTPRequestHandler):
         question = str(body.get("question", ""))[:4000]
         if not question:
             raise ApiError(400, "No question to draw.")
+        if body.get("subject") in llm.NO_DIAGRAM_SUBJECTS:
+            raise ApiError(400, "Diagrams are not available for this subject.")
         model = self._model(body.get("model", ""))
 
         self._spend_one(install)
@@ -384,9 +408,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     if not MODELS:
-        print("warning: no models available. Set OPENAI_API_KEY in server/.env.")
+        print("warning: no models available. Set OPENAI_API_KEY in the environment or server/.env.")
     print(f"models: {', '.join(m['id'] + ' (' + m['tier'] + ')' for m in MODELS)}")
-    print(f"StudyX server on http://localhost:{PORT}  cap {HOURLY_CAP}/hr per user")
+    print(f"PracticeX server on {HOST}:{PORT}  cap {HOURLY_CAP}/hr per user")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
 
