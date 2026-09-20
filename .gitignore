@@ -5,3 +5,4 @@ __pycache__/
 brand/
 .DS_Store
 *.pyc
+dist/

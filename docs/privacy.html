@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PracticeX Privacy Policy</title>
+<link href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600;7..72,700&display=swap" rel="stylesheet">
+<style>
+  :root { --paper:#EFECE6; --ink:#2B3A4A; --coral:#D2542A; --line:#D6DEE8; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:'Literata',Georgia,serif; line-height:1.6; }
+  main { max-width:720px; margin:0 auto; padding:48px 20px 80px; }
+  h1 { font-size:2rem; margin:0 0 4px; } h1 span { color:var(--coral); }
+  h2 { font-size:1.25rem; margin:36px 0 8px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  .meta { color:#5A6E86; margin-bottom:28px; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:.95rem; }
+  th, td { text-align:left; vertical-align:top; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { font-weight:600; }
+  a { color:var(--coral); }
+  nav a { margin-right:16px; }
+</style>
+</head>
+<body>
+<main>
+<nav><a href="index.html">PracticeX</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
+<h1>Practice<span>X</span> Privacy Policy</h1>
+<p class="meta">Effective 20 September 2026</p>
+
+<p>PracticeX is a Chrome extension that reads a question on your screen and writes new practice problems of the same type. This policy explains what information the extension handles, where it goes, and what stays on your computer. The short version: the only thing that leaves your computer is the part of the screen you select, the answers you type for checking, and anything you choose to report. We do not store your screenshots, we do not have user accounts, and we do not sell or share your information with advertisers.</p>
+
+<h2>1. What PracticeX collects and why</h2>
+<table>
+<tr><th>Information</th><th>Where it goes</th><th>Why</th><th>How long it is kept</th></tr>
+<tr><td><strong>Screenshot of the region you select</strong></td><td>Sent to the PracticeX server, which forwards it to OpenAI to generate problems</td><td>To read the question and write similar practice problems</td><td><strong>Not stored.</strong> The server streams it to the model and discards it. It is never written to disk or logged.</td></tr>
+<tr><td><strong>Answers you type</strong> (when you click Check answer)</td><td>Sent to the PracticeX server and forwarded to OpenAI</td><td>To judge whether your answer is correct and give a hint</td><td>Not stored on our server.</td></tr>
+<tr><td><strong>Practice history</strong> (topics, problems, your answers, accuracy, streak)</td><td><strong>Stays on your computer</strong> in Chrome's extension storage</td><td>To show Your progress and let you reopen recent sets</td><td>Until you click Clear history or uninstall the extension. The last 40 sets are kept. Never sent to our server.</td></tr>
+<tr><td><strong>Classes and settings</strong> (class names, subject, difficulty, text size, answer format)</td><td>Stays on your computer</td><td>To remember your preferences</td><td>Until you change them or uninstall.</td></tr>
+<tr><td><strong>Install ID</strong> (a random identifier created when you first open the extension)</td><td>Sent with each request to the PracticeX server</td><td>To enforce the hourly limit on requests, which keeps the service free</td><td>Held in server memory for the one-hour limit window. It is not linked to your name, email, or Google account. We do not know who you are.</td></tr>
+<tr><td><strong>IP address</strong></td><td>Received by the PracticeX server, as with any web request</td><td>To enforce the hourly limit and prevent abuse</td><td>Held in server memory for the one-hour limit window; standard request logs (method and path only) may be kept by our hosting provider.</td></tr>
+<tr><td><strong>Reports</strong> (only if you click Report on a problem)</td><td>Saved on the PracticeX server</td><td>To fix wrong or unhelpful problems</td><td>Includes the generated problem, answer, worked steps, your reason, the model name, and your install ID. The screenshot is never included. Kept until reviewed and resolved.</td></tr>
+</table>
+
+<h2>2. What PracticeX does not do</h2>
+<ul>
+  <li>It does not store, log, or keep your screenshots.</li>
+  <li>It does not read pages in the background. A screenshot is taken only when you click Generate or New screenshot, and only of the tab you are looking at.</li>
+  <li>It does not collect your name, email, Google account, browsing history, passwords, or the contents of other tabs.</li>
+  <li>It does not use analytics, tracking pixels, or advertising.</li>
+  <li>It does not sell, rent, or share your information with third parties, except the AI provider described below.</li>
+  <li>It does not upload your practice history. Your progress lives only on your device.</li>
+</ul>
+
+<h2>3. Third-party AI provider</h2>
+<p>To generate problems, the PracticeX server sends your selected screenshot (and typed answers, when you use Check answer) to <strong>OpenAI</strong> through its API. OpenAI's API data-usage policy applies to that data: at the time of writing, OpenAI states that API inputs are not used to train its models and may be retained for up to 30 days for abuse monitoring. See <a href="https://openai.com/policies/api-data-usage-policies">OpenAI's API data usage policy</a>.</p>
+<p><strong>To limit what is shared, select only the problem.</strong> The crop tool exists so that names, grades, emails, and other parts of the page never leave your computer.</p>
+
+<h2>4. Hosting</h2>
+<p>The PracticeX server runs on <a href="https://render.com">Render</a>. Render may keep standard infrastructure logs (such as request times and IP addresses) under its own <a href="https://render.com/privacy">privacy policy</a>.</p>
+
+<h2>5. Permissions the extension asks for</h2>
+<ul>
+  <li><strong>Storage</strong> — to keep your history, classes, and settings on your device.</li>
+  <li><strong>Read and change data on websites you visit</strong> (requested the first time you click Generate) — Chrome requires this permission to capture a screenshot of the visible tab. PracticeX uses it only for that. It does not read or modify page content, inject scripts, or run on pages in the background.</li>
+</ul>
+
+<h2>6. Children</h2>
+<p>PracticeX is a study tool and may be used by students, including those under 13, at the direction of a parent, teacher, or school. We do not knowingly collect personal information from anyone. The extension has no accounts and no sign-up, and the only data it sends is described in section 1. Parents or guardians with questions can contact us at the address below.</p>
+
+<h2>7. Your choices</h2>
+<ul>
+  <li><strong>Delete your history:</strong> open Your progress and click Clear history, or uninstall the extension. Both remove everything stored on your device.</li>
+  <li><strong>Stop sending screenshots:</strong> simply do not click Generate. Nothing is captured otherwise.</li>
+  <li><strong>Revoke site access:</strong> in <code>chrome://extensions</code>, open PracticeX &rarr; Site access, and remove it. The extension will ask again next time you generate.</li>
+  <li><strong>Delete a report:</strong> email us with the approximate time and problem text and we will remove it.</li>
+</ul>
+
+<h2>8. Security</h2>
+<p>All traffic between the extension and the server uses HTTPS. The AI provider's API keys live only on the server, never in the extension. The server accepts requests only from the published PracticeX extension.</p>
+
+<h2>9. Changes to this policy</h2>
+<p>If we change what PracticeX collects, we will update this page and the effective date, and describe the change in the extension's release notes on the Chrome Web Store.</p>
+
+<h2>10. Contact</h2>
+<p>Questions or requests: <a href="mailto:tapiajake0@gmail.com">tapiajake0@gmail.com</a></p>
+</main>
+</body>
+</html>

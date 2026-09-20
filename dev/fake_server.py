@@ -110,7 +110,7 @@ def _choices(problem, k):
     return {**problem, "options": options, "correct_option": correct}
 
 
-def generate(model, image, media_type, difficulty, count, verbosity="standard", answer_format="free"):
+def generate(model, image, media_type, difficulty, count, verbosity="standard", answer_format="free", answer_mix=50):
     time.sleep(1.0)  # "reading the problem"
     # The last canned problem is routine algebra: the model would rate a figure as not useful.
     problems = [{**p, "steps": [_titled(s) for s in p["steps"]], "diagram_useful": p["diagram"] is not None}
