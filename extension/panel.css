@@ -366,7 +366,7 @@ body.focus .input { font-size: 15px; padding: 11px 14px; }
   align-items: flex-start;
   gap: 14px;
 }
-.diagram2d, .diagram3d { flex: 1; min-width: 0; }
+.diagram2d, .diagram3d, .diagramtable { flex: 1; min-width: 0; }
 /* The note sits beside the figure when there is room for a column, under it when there is not. */
 .diagram-note {
   flex: 0 0 132px;
@@ -1049,7 +1049,7 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
 }
 
 /* ------------------------------------------------------------------ Current settings */
-/* One line, because the slider shows one setting at a time and verbosity hides in settings. */
+/* One line, because the slider shows one setting at a time and the explanation style lives in settings. */
 .current-settings {
   display: flex;
   gap: 10px;
@@ -1164,3 +1164,41 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
 .hit:focus { outline: none; }
 .hit:focus-visible .hit-area { stroke: var(--practicex-fog); stroke-width: calc(1.5 / var(--dz)); }
 @media (prefers-reduced-motion: reduce) { .hit-dot { transition: none; } }
+
+/* ------------------------------------------------------------------ Table figures */
+/* min-width: 0 is load-bearing: without it the flex item will not shrink and pushes the note off-panel. */
+.diagramtable { display: flex; flex-direction: column; gap: 6px; min-width: 0; align-self: stretch; }
+.table-caption { color: var(--practicex-mist); }
+.table-scroll { overflow-x: auto; max-width: 100%; overscroll-behavior-x: contain; }
+.table-scroll:focus-visible { outline: 2px solid var(--practicex-fog); outline-offset: 2px; border-radius: 8px; }
+.figure-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--practicex-bone);
+  min-width: 100%;
+  white-space: nowrap; /* cells are short: scroll rather than wrap into a ragged grid */
+}
+.figure-table th, .figure-table td {
+  border: 1px solid var(--practicex-slate-line);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+.figure-table thead th, .figure-table tbody th {
+  background: var(--practicex-slate-raised);
+  color: var(--practicex-fog);
+  font-weight: 600;
+}
+.figure-table td.blank { min-width: 48px; }
+.figure-table mjx-container { color: var(--practicex-bone); }
+/* A formula in a cell must not inherit display-math spacing and stretch the row. */
+.figure-table mjx-container[display="true"] { margin: 0 !important; padding: 0; }
+@media (max-width: 560px) {
+  .figure-table { font-size: 12px; }
+  .figure-table th, .figure-table td { padding: 6px 8px; }
+}
+
+/* The button glyph follows the kind of figure behind it. */
+.diagram-btn .ico-table { display: none; }
+.diagram-btn[data-figure="table"] .ico-drawing { display: none; }
+.diagram-btn[data-figure="table"] .ico-table { display: block; }

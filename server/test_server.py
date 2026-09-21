@@ -26,10 +26,14 @@ def fake_generate(model, image, media_type, difficulty, count, verbosity, answer
             "problems": [{"question": "Solve", "answer": "4", "steps": []}]}
 
 
-def fake_diagram(model, topic, question):
+def fake_diagram(model, topic, question, want="drawing"):
     yield "{}"
     if question == "impossible":
         return {"diagram": None}
+    if want == "table":
+        return {"diagram": {"kind": "table", "elements": [],
+                            "table": {"caption": None, "row_labels": False,
+                                      "headers": ["Person", "Form"], "rows": [["je", ""]]}}}
     return {"diagram": {"kind": "number_line", "elements": [{"kind": "point"}]}}
 
 
@@ -241,6 +245,61 @@ class ServerTest(unittest.TestCase):
                                    "elements": [{"kind": "point", "points": [[0.5, 0.5]], "grid_cols": 4}]})
         self.assertIsNone(flat["z_min"])
         self.assertIsNone(flat["elements"][0]["grid_cols"])
+
+    def test_table_cleaning(self):
+        base = {"kind": "table", "x_min": 0, "x_max": 0, "y_min": 0, "y_max": 0, "elements": []}
+        d = llm._clean_diagram({**base, "essential": True, "table": {
+            "caption": "Value table", "row_labels": True,
+            "headers": ["x", "f(x)", "  spare  "],
+            "rows": [["-1", "", "a"], ["0", ""], [], ["2", "c" * 300, "d"]],
+        }})
+        self.assertEqual(d["kind"], "table")
+        self.assertIsNone(d["x_min"])  # a table has no bounds to fail on
+        self.assertEqual(d["table"]["headers"], ["x", "f(x)", "spare"])
+        self.assertEqual([len(r) for r in d["table"]["rows"]], [3, 3, 3])  # short row padded, empty row gone
+        self.assertEqual(d["table"]["rows"][1], ["0", "", ""])
+        self.assertEqual(len(d["table"]["rows"][2][1]), llm.MAX_CELL)
+        self.assertTrue(d["table"]["row_labels"])
+        # Nothing usable.
+        self.assertIsNone(llm._clean_diagram({**base, "table": None}))
+        self.assertIsNone(llm._clean_diagram({**base, "table": {"headers": ["only"], "rows": [["a"]]}}))
+        self.assertIsNone(llm._clean_diagram({**base, "table": {"headers": ["a", "b"], "rows": []}}))
+        self.assertIsNone(llm._clean_diagram({**base, "table": {"headers": ["a", "b"], "rows": [["", ""]]}}))
+        # Caps.
+        wide = llm._clean_diagram({**base, "table": {
+            "headers": [str(k) for k in range(20)], "rows": [[str(k) for k in range(20)]] * 40}})
+        self.assertEqual(len(wide["table"]["headers"]), llm.MAX_TABLE_COLS)
+        self.assertEqual(len(wide["table"]["rows"]), llm.MAX_TABLE_ROWS)
+        # A drawn figure still carries the key, empty.
+        drawn = llm._clean_diagram({"kind": "geometry", "x_min": 0, "x_max": 1, "y_min": 0, "y_max": 1,
+                                    "elements": [{"kind": "point", "points": [[0.5, 0.5]]}]})
+        self.assertIsNone(drawn["table"])
+
+    def test_tables_are_allowed_where_drawings_are_not(self):
+        table = {"kind": "table", "essential": False, "elements": [], "table": {
+            "caption": None, "row_labels": False, "headers": ["Tense", "Form"], "rows": [["present", ""]]}}
+        drawing = {"kind": "geometry", "x_min": 0, "x_max": 1, "y_min": 0, "y_max": 1,
+                   "elements": [{"kind": "point", "points": [[0.5, 0.5]]}]}
+
+        def shaped(subject, kind, fig):
+            data = {"readable": True, "subject": subject, "topic": "t", "problems": [
+                {"question": "q", "answer": "a", "diagram_useful": True, "figure_kind": kind, "diagram": fig}]}
+            return llm.shape_generated(data, 1)["problems"][0]
+
+        for subject in ("writing", "language", "history"):
+            p = shaped(subject, "table", table)
+            self.assertEqual((p["diagram_useful"], p["figure_kind"], p["diagram"]["kind"]),
+                             (True, "table", "table"), subject)
+            # A drawing is still refused there, even when the model mislabels it as a table.
+            self.assertIsNone(shaped(subject, "drawing", drawing)["diagram"], subject)
+            self.assertIsNone(shaped(subject, "table", drawing)["diagram"], subject)
+        self.assertEqual(shaped("chemistry", "table", table)["diagram"]["kind"], "table")
+        self.assertEqual(shaped("math", "drawing", drawing)["diagram"]["kind"], "geometry")
+        # The endpoint follows the same rule: a table request is fine for writing, a drawing is not.
+        status, _, _ = self.call("/v1/diagram", {"question": "Conjugate parler", "subject": "language", "want": "table"})
+        self.assertNotEqual(status, 400)
+        status, _, _ = self.call("/v1/diagram", {"question": "Fix the comma", "subject": "writing"})
+        self.assertEqual(status, 400)
 
     def test_rejects_missing_install_and_bad_image(self):
         status, _, _ = self.call("/v1/config", install="x")

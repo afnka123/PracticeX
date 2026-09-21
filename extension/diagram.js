@@ -1,4 +1,5 @@
 import { render3D } from "./diagram3d.js";
+import { renderTable } from "./table.js";
 import { controlBar } from "./diagram-ui.js";
 
 // Draws the model's diagram spec as SVG. The spec is data only; every label goes in via textContent.
@@ -37,13 +38,57 @@ function fmtRead(n) {
 }
 
 const FLAT = ["point", "vector", "segment", "line", "ray", "polygon", "circle", "curve", "angle", "text"];
+const MAX_TABLE_COLS = 8;
+const MAX_TABLE_ROWS = 14;
+const MAX_CELL = 160;
 const SPACE = ["point", "vector", "segment", "line", "ray", "polygon", "curve", "text", "sphere", "surface"];
 const finite = (n) => typeof n === "number" && Number.isFinite(n);
+
+const cell = (v) =>
+  typeof v === "string" || (typeof v === "number" && Number.isFinite(v))
+    ? String(v).split(/\s+/).filter(Boolean).join(" ").slice(0, MAX_CELL)
+    : "";
+
+// Same rules as the server's _clean_table.
+function cleanTable(d) {
+  const t = d.table;
+  if (!t || typeof t !== "object") return null;
+  let headers = (Array.isArray(t.headers) ? t.headers : [])
+    .filter((h) => typeof h === "string")
+    .map(cell)
+    .slice(0, MAX_TABLE_COLS);
+  const rawRows = (Array.isArray(t.rows) ? t.rows : []).filter(Array.isArray).slice(0, MAX_TABLE_ROWS);
+  const cols = Math.min(headers.length || Math.max(0, ...rawRows.map((r) => r.length)), MAX_TABLE_COLS);
+  if (cols < 2 || !rawRows.length) return null;
+  if (headers.length) headers = Array.from({ length: cols }, (_, k) => headers[k] ?? "");
+  const rows = [];
+  for (const r of rawRows) {
+    // Short rows are padded rather than dropped, so a table still draws while it is streaming.
+    const row = Array.from({ length: cols }, (_, k) => cell(r[k]));
+    if (row.some(Boolean)) rows.push(row);
+  }
+  if (!rows.length) return null;
+  return {
+    kind: "table",
+    essential: Boolean(d.essential),
+    x_min: null, x_max: null, y_min: null, y_max: null, z_min: null, z_max: null,
+    show_grid: false,
+    x_label: null, y_label: null, z_label: null,
+    elements: [],
+    table: {
+      caption: t.caption ? String(t.caption).slice(0, 80) : null,
+      headers,
+      rows,
+      row_labels: Boolean(t.row_labels),
+    },
+  };
+}
 
 // Same rules as the server's _clean_diagram, so a diagram still being streamed can never break drawing.
 export function cleanDiagram(d) {
   if (!d || typeof d !== "object") return null;
-  const kind = ["coordinate_plane", "number_line", "geometry", "space_3d"].includes(d.kind) ? d.kind : "geometry";
+  const kind = ["coordinate_plane", "number_line", "geometry", "space_3d", "table"].includes(d.kind) ? d.kind : "geometry";
+  if (kind === "table") return cleanTable(d); // before the bounds check, which a table has no use for
   const space = kind === "space_3d";
   const axes = space ? ["x", "y", "z"] : ["x", "y"];
   const b = [];
@@ -94,6 +139,7 @@ export function cleanDiagram(d) {
     y_label: d.y_label ? String(d.y_label).slice(0, 20) : null,
     z_label: space && d.z_label ? String(d.z_label).slice(0, 20) : null,
     elements,
+    table: null,
   };
 }
 
@@ -174,9 +220,10 @@ function readablePoints(d, numberLine) {
   return [...seen.values()].slice(0, 40);
 }
 
-export function renderDiagram(raw) {
+export function renderDiagram(raw, opts = {}) {
   const d = cleanDiagram(raw);
   if (!d) return null;
+  if (d.kind === "table") return renderTable(d, opts);
   if (d.kind === "space_3d") return render3D(d);
   const id = `dg${uid++}`;
   const numberLine = d.kind === "number_line";

@@ -36,12 +36,12 @@ import llm  # noqa: E402  (after .env so the SDK clients see the keys)
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8787"))
-HOURLY_CAP = int(os.environ.get("HOURLY_CAP", "50"))
-FOUNDER_HOURLY_CAP = int(os.environ.get("FOUNDER_HOURLY_CAP", "200"))
+HOURLY_CAP = int(os.environ.get("HOURLY_CAP", "200"))
+FOUNDER_HOURLY_CAP = int(os.environ.get("FOUNDER_HOURLY_CAP", "1000"))
 # Per-IP cap stops one machine from rotating install ids to dodge the per-user cap.
 IP_HOURLY_CAP = int(os.environ.get("IP_HOURLY_CAP", str(HOURLY_CAP * 3)))
 # Ceiling across all users, as a last line of defence for the API bill.
-GLOBAL_HOURLY_CAP = int(os.environ.get("GLOBAL_HOURLY_CAP", "600"))
+GLOBAL_HOURLY_CAP = int(os.environ.get("GLOBAL_HOURLY_CAP", "3000"))
 FOUNDER_TOKEN = os.environ.get("FOUNDER_TOKEN", "")
 # In production, set this to the packed extension's id (comma-separated for more than one) so only
 # that extension gets CORS. Left empty, any extension and localhost may call the server.
@@ -355,16 +355,18 @@ class Handler(BaseHTTPRequestHandler):
         body = self._json_body()
         topic = str(body.get("topic", ""))[:200]
         question = str(body.get("question", ""))[:4000]
+        want = "table" if body.get("want") == "table" else "drawing"
         if not question:
             raise ApiError(400, "No question to draw.")
-        if body.get("subject") in llm.NO_DIAGRAM_SUBJECTS:
+        # Drawings stay out of writing, language and history; a table is welcome in any subject.
+        if want != "table" and body.get("subject") in llm.NO_DIAGRAM_SUBJECTS:
             raise ApiError(400, "Diagrams are not available for this subject.")
         model = self._model(body.get("model", ""))
 
         self._spend_one(install)
-        result = self._collect(llm.diagram(model, topic, question))  # only useful whole, so not streamed
+        result = self._collect(llm.diagram(model, topic, question, want))  # only useful whole, so not streamed
         if not result["diagram"]:
-            raise ApiError(502, "The model could not draw a diagram for this question.")
+            raise ApiError(502, f"The model could not build a {want} for this question.")
         return {**result, "usage": self._usage(install)}
 
     def post_check(self):

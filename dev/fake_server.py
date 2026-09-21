@@ -50,6 +50,21 @@ PROBLEMS = [
         "common_mistake": r"Drawing a filled dot at \(4\). The inequality is strict, so \(4\) itself is not included and the dot is open.",
     },
     {
+        "question": r"Complete the truth table for \(p \wedge \neg q\).",
+        "diagram": {"kind": "table", "essential": True, "elements": [],
+                    "x_min": 0, "x_max": 0, "y_min": 0, "y_max": 0, "show_grid": False,
+                    "x_label": None, "y_label": None, "z_label": None, "z_min": None, "z_max": None,
+                    "table": {"caption": "Truth table", "row_labels": False,
+                              "headers": [r"\(p\)", r"\(q\)", r"\(\neg q\)", r"\(p \wedge \neg q\)"],
+                              "rows": [["T", "T", "", ""], ["T", "F", "", ""], ["F", "T", "", ""], ["F", "F", "", ""]]}},
+        "answer": r"Only the second row is true: \(p = T,\ q = F\).",
+        "approach": r"Negate \(q\) first, then take the conjunction row by row.",
+        "steps": [r"Flip each value of \(q\). \(\neg q\) is T exactly where \(q\) is F.",
+                  r"A conjunction is true only when both parts are true, so look for a row with \(p = T\) and \(\neg q = T\)."],
+        "check": r"Four rows in, one T out: a conjunction is true in exactly one case out of four here.",
+        "common_mistake": r"Negating the whole conjunction instead of just \(q\).",
+    },
+    {
         "question": r"In triangle \(ABC\), \(\angle A = 52^\circ\) and \(\angle B = 71^\circ\). Find \(\angle C\).",
         "diagram": {"kind": "geometry", "x_min": -0.5, "x_max": 6.5, "y_min": -0.6, "y_max": 4.6, "show_grid": False, "x_label": None, "y_label": None,
                     "elements": [el("polygon", [[0, 0], [6, 0], [2.4, 4]]), el("angle", [[6, 0], [0, 0], [2.4, 4]], "52°", "secondary"),
@@ -82,6 +97,16 @@ PROBLEMS = [
     },
 ]
 
+# A table the "Make me a table" button can return, for the writing and language path.
+TABLE_SAMPLE = {
+    "kind": "table", "essential": False, "elements": [],
+    "x_min": 0, "x_max": 0, "y_min": 0, "y_max": 0, "show_grid": False,
+    "x_label": None, "y_label": None, "z_label": None, "z_min": None, "z_max": None,
+    "table": {"caption": "Present tense", "row_labels": True,
+              "headers": ["Person", "parler", "finir"],
+              "rows": [["je", "", ""], ["tu", "", ""], ["il / elle", "", ""], ["nous", "", ""]]},
+}
+
 
 def _type_out(value, chars=24, delay=0.03):
     """Streams the JSON of `value` a few characters at a time, like a model would."""
@@ -113,7 +138,8 @@ def _choices(problem, k):
 def generate(model, image, media_type, difficulty, count, verbosity="standard", answer_format="free", answer_mix=50):
     time.sleep(1.0)  # "reading the problem"
     # The last canned problem is routine algebra: the model would rate a figure as not useful.
-    problems = [{**p, "steps": [_titled(s) for s in p["steps"]], "diagram_useful": p["diagram"] is not None}
+    problems = [{**p, "steps": [_titled(s) for s in p["steps"]], "diagram_useful": p["diagram"] is not None,
+                 "figure_kind": "table" if (p["diagram"] or {}).get("kind") == "table" else "drawing"}
                 for p in PROBLEMS[:count]]
     if answer_format == "multiple_choice":
         problems = [_choices(p, k) for k, p in enumerate(problems)]
@@ -158,10 +184,10 @@ SAMPLES_3D = [
 _made = [0]
 
 
-def diagram(model, topic, question):
+def diagram(model, topic, question, want="drawing"):
     time.sleep(1.2)
     yield "{}"
-    sample = SAMPLES_3D[_made[0] % len(SAMPLES_3D)]
+    sample = TABLE_SAMPLE if want == "table" else SAMPLES_3D[_made[0] % len(SAMPLES_3D)]
     _made[0] += 1
     return {"diagram": llm._clean_diagram(sample)}
 

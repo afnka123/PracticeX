@@ -61,7 +61,6 @@
               <option value="count">Problems</option>
               <option value="difficulty">Difficulty</option>
               <option value="answers">Answer type</option>
-              <option value="verbosity">Explanation</option>
             </select>
             <span class="readout-stack">
               <span class="count-readout mono" id="count-readout">3</span>
@@ -99,14 +98,6 @@
               <p class="slider-hint">Set the answer format by preference.
                 <span class="slider-note">*Select Either if you have no preference between multiple-choice and free-response questions.</span>
               </p>
-            </div>
-            <div class="slider-body" id="verb-body">
-              <div class="segmented" id="verbosity" role="radiogroup" aria-label="Verbosity">
-                <button role="radio" data-value="brief">Brief</button>
-                <button role="radio" data-value="standard">Standard</button>
-                <button role="radio" data-value="detailed">Detailed</button>
-              </div>
-              <p class="slider-hint" id="verbosity-hint"></p>
             </div>
           </div>
           <div class="current-settings" id="current-settings">
@@ -167,8 +158,9 @@
       <div class="card question-card">
         <div class="typing" id="typing" hidden><span class="label" id="typing-label">Reading the problem</span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
         <div class="content question" id="question"></div>
-        <button class="diagram-btn" id="diagram-toggle" hidden>
-          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 17V3M3 17h14M5.5 13.5l4-5 3 2.5 4-6"/></svg>
+        <button class="diagram-btn" id="diagram-toggle" data-figure="drawing" hidden>
+          <svg class="ico-drawing" viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 17V3M3 17h14M5.5 13.5l4-5 3 2.5 4-6"/></svg>
+          <svg class="ico-table" viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M3 4.5h14v11H3zM3 8.5h14M8.5 8.5v7"/></svg>
           <span id="diagram-toggle-label">View diagram</span>
         </button>
         <div class="diagram-wrap" id="diagram" hidden></div>
@@ -342,6 +334,16 @@
             <span class="size-a large" aria-hidden="true">A</span>
           </div>
           <div class="content size-sample" id="size-sample"></div>
+        </div>
+
+        <div class="field">
+          <span class="label">Explanation</span>
+          <div class="segmented" id="verbosity" role="radiogroup" aria-label="Verbosity">
+            <button role="radio" data-value="brief">Brief</button>
+            <button role="radio" data-value="standard">Standard</button>
+            <button role="radio" data-value="detailed">Detailed</button>
+          </div>
+          <p class="hint" id="verbosity-hint"></p>
         </div>
       </div>
 

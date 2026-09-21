@@ -18,9 +18,9 @@ services:
       - key: TRUST_PROXY
         value: "1" # read the client IP from X-Forwarded-For, so the per-IP cap is real
       - key: HOURLY_CAP
-        value: "50"
+        value: "200"
       - key: GLOBAL_HOURLY_CAP
-        value: "600"
+        value: "3000"
       - key: OPENAI_API_KEY
         sync: false
       - key: FOUNDER_TOKEN

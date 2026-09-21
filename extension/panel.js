@@ -27,7 +27,7 @@ const SUBJECT_LABELS = {
   other: "Other",
 };
 const MIN_FOR_INSIGHT = 4; // answers needed in a subject before calling it a strength or a weakness
-const PROBLEM_FIELDS = ["question", "diagram_useful", "diagram", "options", "correct_option", "answer", "accepted_answers", "approach", "steps", "check", "common_mistake"];
+const PROBLEM_FIELDS = ["question", "diagram_useful", "figure_kind", "diagram", "options", "correct_option", "answer", "accepted_answers", "approach", "steps", "check", "common_mistake"];
 
 const $ = (id) => document.getElementById(id);
 
@@ -284,7 +284,7 @@ function renderUsage() {
   box.hidden = false;
   const out = left === 0;
   box.classList.toggle("out", out);
-  box.classList.toggle("low", !out && left <= 3);
+  box.classList.toggle("low", !out && left <= Math.max(3, Math.round(usage.limit * 0.05)));
   const resets = usage.resets_at ? formatTime(usage.resets_at) : "";
   if (out) {
     $("usage-main").textContent = resets ? `No questions left until ${resets}` : "No questions left this hour";
@@ -351,10 +351,34 @@ function setRich(node, text, live = false) {
   typeset(node);
 }
 
+// mathjax-config.js sets window.MathJax synchronously, but `startup` only exists once the 2MB bundle
+// has run, and it is deferred. Anything rendered before then used to skip typesetting in silence and
+// keep its raw \( ... \) on screen for good, since the node is marked rendered either way.
+let mathReady = null;
+function whenMathReady() {
+  if (window.MathJax?.startup?.promise) return window.MathJax.startup.promise;
+  if (!mathReady) {
+    const deadline = Date.now() + 20000;
+    mathReady = new Promise((resolve) => {
+      const look = () => {
+        if (window.MathJax?.startup?.promise) return resolve(window.MathJax.startup.promise);
+        // Give up eventually rather than hold the queue: the LaTeX source still reads as text.
+        if (Date.now() > deadline) {
+          console.warn("MathJax never loaded; showing LaTeX source");
+          return resolve();
+        }
+        setTimeout(look, 50);
+      };
+      look();
+    });
+  }
+  return mathReady;
+}
+
 let typesetQueue = Promise.resolve();
 function typeset(node) {
   typesetQueue = typesetQueue
-    .then(() => window.MathJax?.startup?.promise)
+    .then(whenMathReady)
     .then(() => window.MathJax?.typesetPromise?.([node]))
     .then(() => fitInlineMath(node))
     .catch((err) => console.warn("MathJax:", err));
@@ -389,6 +413,7 @@ function normalizeAnswer(text) {
     .replace(/\\(cdot|times)|×|·/g, "*")
     .replace(/\\pi/g, "π")
     .replace(/\\text\{([^{}]*)\}/g, "$1")
+    .replace(/\\(?:ce|pu)\{([^{}]*)\}/g, "$1")
     .replace(/[{}\\$]/g, "")
     .replace(/[−–]/g, "-")
     .toLowerCase()
@@ -583,8 +608,8 @@ function applyAnswers({ animate = false } = {}) {
   renderCurrentSettings();
 }
 
-const SLIDERS = ["count", "difficulty", "answers", "verbosity"];
-const SLIDER_BODY = { count: "count-body", difficulty: "diff-body", answers: "ans-body", verbosity: "verb-body" };
+const SLIDERS = ["count", "difficulty", "answers"];
+const SLIDER_BODY = { count: "count-body", difficulty: "diff-body", answers: "ans-body" };
 // Verbosity has no readout: the segmented control already shows which one is on.
 const SLIDER_READOUT = { count: "count-readout", difficulty: "diff-readout", answers: "ans-readout" };
 
@@ -823,6 +848,8 @@ function toProblem(raw, complete) {
     question: typeof raw.question === "string" ? raw.question : "",
     // Missing in sets saved before the model rated each question; those keep the old behavior.
     diagram_useful: raw.diagram_useful !== false,
+    // Sets saved before tables existed were all drawings.
+    figure_kind: raw.figure_kind === "table" ? "table" : "drawing",
     diagram: raw.diagram && typeof raw.diagram === "object" ? raw.diagram : null,
     options: Array.isArray(raw.options) ? raw.options.filter((o) => typeof o === "string") : [],
     correct_option: Number.isInteger(raw.correct_option) ? raw.correct_option : null,
@@ -1022,6 +1049,10 @@ function renderDiagramArea(i, p) {
   const label = $("diagram-toggle-label");
   const wrap = $("diagram");
   const diagram = p?.diagram || state.madeDiagrams[i] || null;
+  // Before a figure exists the model's own call decides the wording; after it, the figure itself does.
+  const isTable = diagram ? diagram.kind === "table" : p?.figure_kind === "table";
+  const noun = isTable ? "table" : "diagram";
+  toggle.dataset.figure = isTable ? "table" : "drawing";
   const hideAll = () => {
     toggle.hidden = true;
     wrap.hidden = true;
@@ -1034,16 +1065,16 @@ function renderDiagramArea(i, p) {
   if (drawing.has(`${state.setId}:${i}`) || (p.diagram && !p._done.diagram)) {
     toggle.disabled = true;
     toggle.dataset.action = "";
-    label.textContent = "Drawing diagram";
+    label.textContent = isTable ? "Building table" : "Drawing diagram";
     wrap.hidden = true;
     return;
   }
   if (!diagram) {
     // No figure yet. The student can ask for one, but only where the model judged a figure could help:
-    // never for writing, language or history, and not for simple arithmetic.
-    if (!p._done.diagram || !p.diagram_useful || NO_DIAGRAM_SUBJECTS.has(state.subject)) return hideAll();
+    // not for simple arithmetic, and no drawings for writing, language or history — a table is fine there.
+    if (!p._done.diagram || !p.diagram_useful || (NO_DIAGRAM_SUBJECTS.has(state.subject) && !isTable)) return hideAll();
     toggle.dataset.action = "make";
-    label.textContent = "Make me a diagram";
+    label.textContent = `Make me a ${noun}`;
     wrap.hidden = true;
     return;
   }
@@ -1053,26 +1084,28 @@ function renderDiagramArea(i, p) {
   const open = state.diagramOpen[i];
   toggle.dataset.action = "toggle";
   toggle.setAttribute("aria-expanded", String(open));
-  label.textContent = open ? "Hide diagram" : "View diagram";
+  label.textContent = open ? `Hide ${noun}` : `View ${noun}`;
   wrap.hidden = !open;
   const key = `${i}:${JSON.stringify(diagram)}`;
   if (open && wrap.dataset.src !== key) {
     wrap.dataset.src = key;
-    const figure = renderDiagram(diagram);
-    wrap.replaceChildren(...(figure ? [figure, diagramNote()] : []));
+    const figure = renderDiagram(diagram, { typeset });
+    wrap.replaceChildren(...(figure ? [figure, diagramNote(isTable)] : []));
     if (!figure) hideAll();
   }
 }
 
 // A figure can hand over an answer that was meant to be worked out, so it says so, quietly, beside itself.
-function diagramNote() {
+function diagramNote(isTable) {
   const note = document.createElement("aside");
   note.className = "diagram-note";
   const label = document.createElement("span");
   label.className = "label";
   label.textContent = "Note";
   const body = document.createElement("p");
-  body.textContent = "A figure can give away the answer. Read it to check your working, not to skip it.";
+  body.textContent = isTable
+    ? "A table can give away the answer. Read it to check your working, not to skip it."
+    : "A figure can give away the answer. Read it to check your working, not to skip it.";
   note.append(label, body);
   return note;
 }
@@ -1092,6 +1125,7 @@ async function makeDiagram() {
       subject: state.subject,
       topic: state.topic,
       question: p.question,
+      want: p.figure_kind === "table" ? "table" : "drawing",
     });
     if (state.setId === setId) {
       state.madeDiagrams[i] = data.diagram;

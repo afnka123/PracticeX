@@ -112,23 +112,41 @@ leaked key.
   band sweeps across the answer and the box glows for about 3 seconds; then the answer and Show work
   appear. Editing the answer clears an old result. Each step shows
   only its title; click it (or **Open all**) to read the explanation.
-- **Verbosity** (Settings): Brief, Standard or Detailed. It is sent with each request and controls how many
+- **Explanation** (Settings): Brief, Standard or Detailed. It is sent with each request and controls how many
   steps there are and how much each one explains. In a real test with GPT-5.6 Luna, Brief gave 3 short steps
   and Detailed gave 6 steps averaging about 260 characters each.
   **More like these** reuses the last screenshot, so no new capture is needed.
 - **Math rendering.** The model writes LaTeX. MathJax 3.2.2 (`extension/vendor/mathjax`, Apache 2.0) renders it
   as SVG. It is bundled because extensions cannot load remote scripts. TeX's `\href`, `\require` and
-  autoloading are switched off because model output is untrusted. Problem text uses STIX Two Text, so it reads
+  autoloading are switched off because model output is untrusted.
+- **Typesetting is never skipped.** The MathJax bundle is 2MB and deferred, so a problem can render
+  before it has run. `whenMathReady` in `extension/panel.js` waits for it and typesets when it lands,
+  instead of silently leaving raw `\( ... \)` on screen for the life of the panel.
+- **Chemistry and physics notation.** `mhchem` ships in MathJax's default set, and `physics` is switched on
+  by name in `extension/mathjax-config.js` (it is in the bundle but not in `AllPackages`). `FORMAT_RULES`
+  in `server/llm.py` tells the model to use them: `\ce{2H2 + O2 -> 2H2O}` and `\pu{0.25 mol//L}` for
+  chemistry, `\vb`, `\va`, `\dv`, `\pdv`, `\abs`, `\norm`, `\qty`, `\grad`, `\divergence`, `\curl`
+  for physics. The `physics` package steals `\div` for divergence, so the config puts `÷` back with a
+  `macros` entry and the prompt bans `\div` for division; `\divergence` still names the operator. Problem text uses STIX Two Text, so it reads
   apart from the interface. The text size slider in Settings scales it from 85% to 180%.
 - **Subject and diagrams.** The model labels each set's `subject` (math, physics, chemistry, biology,
   other_science, writing, language, history, other) and marks every question with `diagram_useful`. A
-  diagram button, including **Make me a diagram**, appears only where that flag is true: never for writing,
-  language or history, and not for simple arithmetic or routine symbol pushing. The server enforces this in
-  `shape_generated`, so a figure sent against the rules is dropped, and `/v1/diagram` refuses those subjects.
+  diagram button, including **Make me a diagram**, appears only where that flag is true: not for simple
+  arithmetic or routine symbol pushing, and no *drawings* for writing, language or history. The server
+  enforces this in `shape_generated`, so a drawing sent against the rules is dropped, and `/v1/diagram`
+  refuses a drawing for those subjects.
   Where a figure does help, the model returns a small drawing spec rather than SVG: vectors, points,
   segments, lines, rays, polygons, circles, curves, angles and number lines. `extension/diagram.js`
   validates and draws it, with the same checks as the server's `_clean_diagram`. Every label is set as
   text, never HTML. The prompt forbids drawing the answer.
+- **Tables.** `figure_kind` on each question says whether a drawing or a table would help, so the button
+  can read **Make me a table** before anything exists, then **View table** / **Hide table** after. A table
+  figure is `kind: "table"` carrying `{caption, headers, rows, row_labels}` instead of elements: up to 8
+  columns and 14 rows, cells up to 160 characters, an empty cell being one the student is meant to fill in.
+  Unlike drawings, tables are allowed in every subject — a conjugation table for languages, an ICE table
+  for chemistry, a truth table for logic, compare-and-contrast for history. `extension/table.js` draws a
+  real `<table>` with `textContent` cells, then hands the whole thing to MathJax in one pass; it scrolls
+  sideways rather than wrapping, and has no zoom controls because zooming a table gains nothing.
 - **Working the figure.** Flat figures zoom (the + and − buttons, a trackpad pinch, or +/−/0 on the
   keyboard) up to 6x, and pan by dragging once zoomed; double-click resets. Marked points, corners, ends
   and centers are clickable, and so is every place two pieces cross — `extension/diagram.js` solves those
@@ -187,17 +205,17 @@ away. Previous and Next keep their slots when they do not apply, so the bar neve
 ## Cost controls (brief §7, "Cost abuse")
 
 - The API keys live only on the server. The extension has none.
-- The panel states the allowance in words under the header: "12 questions left" with "of 20 this hour",
-  switching to the reset time in the last three, and "Limit reached · Resets at 4:15" at zero. At zero,
+- The panel states the allowance in words under the header: "120 questions left this hour", switching to
+  the reset time in the last 5% of the cap, and "No questions left until 4:15" at zero. At zero,
   Generate, New screenshot and More like these are disabled, so a student never spends a click on a
   request the server would refuse.
 - All limits are sliding one-hour windows, enforced on the server:
-  - `HOURLY_CAP`: per install, default 50.
+  - `HOURLY_CAP`: per install, default 200.
   - `IP_HOURLY_CAP`: per IP, default 3× the per-install cap. This stops a script from rotating install
     ids.
-  - `GLOBAL_HOURLY_CAP`: across everyone, default 600. It protects the bill if the extension goes viral
+  - `GLOBAL_HOURLY_CAP`: across everyone, default 3000. It protects the bill if the extension goes viral
     or gets abused.
-- Founders get `FOUNDER_HOURLY_CAP` (default 200).
+- Founders get `FOUNDER_HOURLY_CAP` (default 1000).
 - Invalid requests are rejected before they count against the cap.
 - Also set a monthly spending limit on the API key itself in the OpenAI dashboard. The server cannot
   protect against a leaked key.
