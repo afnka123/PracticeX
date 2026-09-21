@@ -23,6 +23,19 @@ PARABOLA = [[x / 10, (x / 10) ** 2 - 2 * (x / 10) - 3] for x in range(-20, 41)]
 
 PROBLEMS = [
     {
+        "question": r"Carbonic acid dissociates in water according to \(\ce{H2CO3 + H2O <=> H3O+ + HCO3-}\). Suppose that additional hydronium ions are added to the solution. What happens to the concentration of \(\ce{H2CO3}\) after the system reestablishes equilibrium?",
+        "diagram": None,
+        "answer": r"The concentration of \(\ce{H2CO3}\) increases. Adding \(\ce{H3O+}\) shifts the equilibrium to the left.",
+        "approach": r"Le Chatelier's principle says a system at equilibrium responds to a stress by shifting to partly undo it. Here the stress is extra product, \(\ce{H3O+}\), so the reaction runs in reverse: \[\ce{H3O+ + HCO3- -> H2CO3 + H2O}\]",
+        "steps": [
+            r"Identify the stress. Hydronium, \(\ce{H3O+}\), sits on the product side, and its concentration was raised.",
+            r"Apply Le Chatelier's principle. The system shifts away from the added species, so it shifts left, toward reactants.",
+            r"Read off the effect on \(\ce{H2CO3}\). It is a reactant, so a leftward shift makes more of it: \(\pu{[H2CO3]}\) rises.",
+        ],
+        "check": r"Check with the equilibrium expression \(K_a = \dfrac{[\ce{H3O+}][\ce{HCO3-}]}{[\ce{H2CO3}]}\). \(K_a\) is fixed, so raising \(\ce{H3O+}\) must raise the denominator to compensate.",
+        "common_mistake": r"Thinking that adding \(\ce{H3O+}\) pushes the reaction forward. Adding a product drives a reaction backward, not forward.",
+    },
+    {
         "question": r"Given \(\mathbf{a} = \langle 3, -1 \rangle\) and \(\mathbf{b} = \langle -2, 2 \rangle\), find \(\mathbf{a} + \mathbf{b}\) and describe where it points.",
         "diagram": {"kind": "coordinate_plane", "x_min": -3, "x_max": 4, "y_min": -2, "y_max": 3, "show_grid": True, "x_label": "x", "y_label": "y",
                     "elements": [el("vector", [[0, 0], [3, -1]], "a"), el("vector", [[0, 0], [-2, 2]], "b", "secondary")]},
