@@ -89,7 +89,10 @@ leaked key.
   `easier` / `same` / `harder` strings still work and land on 25 / 50 / 75, so sets saved before the slider
   reopen at the right spot. **More like these** moves the slider 25 either way instead of jumping to a fixed
   step.
-- **1 to 5 problems per set.** Chosen with the Problems slider. One request returns every problem with its
+- **1 to 5 problems per set.** Chosen with the Problems slider. Problems and Difficulty sit side by
+  side as a pair of buttons, each showing what it is currently set to; tapping one hands it the single
+  slider underneath. Both slider bodies share one grid cell, so switching never moves anything below
+  it. There used to be a dropdown to pick between them, and a third entry for the answer format. One request returns every problem with its
   answer and a full worked solution: approach, titled steps, a check, and the common mistake. The student
   sees the answer only after clicking View answer, and the worked solution only after Show work.
 - **Answers.** The model picks the format each question calls for: multiple choice where the skill is

@@ -86,7 +86,8 @@ async function loadStorage() {
   settings = { ...settings, ...(local.settings || {}) };
   if (!DEV) settings.serverUrl = DEFAULT_SERVER;
   prefs = { ...prefs, ...(local.prefs || {}) };
-  // The written/choices pair used to be two buttons; it is a slider now, so old prefs land on an end.
+  // The slider used to set the answer format too. An install left on that setting heals to Problems.
+  if (!SLIDERS.includes(prefs.slider)) prefs.slider = "count";
   const session = await chrome.storage.session.get("state");
   if (session.state) state = { ...state, ...session.state.data };
   state.problems = state.problems.map((p) => ({ ...p, steps: toSteps(p.steps) })); // sessions saved before step titles
@@ -646,21 +647,30 @@ function applyDifficulty({ animate = false } = {}) {
 
 const SLIDERS = ["count", "difficulty"];
 const SLIDER_BODY = { count: "count-body", difficulty: "diff-body" };
-// Verbosity has no readout: the segmented control already shows which one is on.
-const SLIDER_READOUT = { count: "count-readout", difficulty: "diff-readout" };
+const SLIDER_PICK = { count: "pick-count", difficulty: "pick-difficulty" };
 
-// The three bodies sit in one grid cell so the field never changes height, and the one on top
-// fades in rather than snapping: nothing below it moves when you switch.
+// Both settings are on screen at once, each on its own button with its current value, and the button
+// chooses which one the slider below sets. The two slider bodies sit in one grid cell, so the field
+// is always as tall as the taller of them and nothing under it moves when you switch; the one coming
+// in fades and lifts into place while the other fades out. Only the chosen one is focusable.
 function renderSliderPick() {
   const which = SLIDERS.includes(prefs.slider) ? prefs.slider : "count";
-  $("slider-pick").value = which;
   for (const name of SLIDERS) {
     const on = name === which;
     const body = $(SLIDER_BODY[name]);
     body.classList.toggle("on", on);
     body.inert = !on;
-    if (SLIDER_READOUT[name]) $(SLIDER_READOUT[name]).classList.toggle("on", on);
+    const pick = $(SLIDER_PICK[name]);
+    pick.classList.toggle("on", on);
+    pick.setAttribute("aria-selected", String(on));
   }
+}
+
+function pickSlider(name) {
+  if (!SLIDERS.includes(name) || prefs.slider === name) return;
+  prefs.slider = name;
+  savePrefs();
+  renderSliderPick();
 }
 
 function applyCount({ animate = false } = {}) {
@@ -683,14 +693,9 @@ function applyCount({ animate = false } = {}) {
   renderCurrentSettings();
 }
 
-// One place that says what Generate will produce: the slider only shows one of these at a time,
-// and the explanation style lives over in settings.
+// Problems and Difficulty are on their own buttons now, so this row carries only what is not
+// already on screen.
 function renderCurrentSettings() {
-  const level = difficultyLevel();
-  const [, word] = difficultyBand(level);
-  $("cs-difficulty").textContent = word;
-  $("cs-difficulty").style.color = difficultyColor(level);
-  $("cs-count").textContent = prefs.count;
   $("cs-verbosity").textContent = prefs.verbosity.charAt(0).toUpperCase() + prefs.verbosity.slice(1);
 }
 
@@ -2235,11 +2240,9 @@ function bind() {
   });
   // A settle at the end of the drag, not a bulge on every pixel of it.
   $("difficulty").addEventListener("change", () => applyDifficulty({ animate: true }));
-  $("slider-pick").addEventListener("change", (e) => {
-    prefs.slider = e.target.value;
-    savePrefs();
-    renderSliderPick();
-  });
+  for (const [name, id] of Object.entries(SLIDER_PICK)) {
+    $(id).addEventListener("click", () => pickSlider(name));
+  }
   $("count").addEventListener("input", (e) => {
     prefs.count = Number(e.target.value);
     applyCount({ animate: true });

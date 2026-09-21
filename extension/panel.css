@@ -204,26 +204,18 @@ body.focus .input { font-size: 15px; padding: 11px 14px; }
   justify-content: center;
   opacity: 0;
   visibility: hidden;
-  transform: translateY(5px) scale(0.985);
-  transition: opacity 0.22s ease, transform 0.26s var(--pop), visibility 0s linear 0.26s;
+  transform: translateY(4px) scale(0.99);
+  transition: opacity 0.13s ease, transform 0.18s var(--pop), visibility 0s linear 0.18s;
 }
 .slider-body.on {
   opacity: 1;
   visibility: visible;
   transform: none;
-  transition: opacity 0.22s ease, transform 0.26s var(--pop), visibility 0s;
+  /* Comes in just behind the outgoing one, so the swap reads as one movement. */
+  transition: opacity 0.16s ease 0.05s, transform 0.22s var(--pop) 0.05s, visibility 0s;
 }
-/* Same trick for the three readouts, so the row-label keeps one height too. */
-.readout-stack { display: grid; justify-items: end; }
-.readout-stack > * {
-  grid-area: 1 / 1;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.22s ease, visibility 0s linear 0.22s;
-}
-.readout-stack > .on { opacity: 1; visibility: visible; transition: opacity 0.22s ease, visibility 0s; }
 @media (prefers-reduced-motion: reduce) {
-  .slider-body, .slider-body.on, .readout-stack > * { transition: opacity 0.12s linear; transform: none; }
+  .slider-body, .slider-body.on { transition: opacity 0.12s linear; transform: none; }
 }
 .count { position: relative; height: 44px; }
 .wedge {
@@ -1110,45 +1102,67 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
 @media (prefers-reduced-motion: reduce) { .cs-val { transition: none; } }
 
 /* ------------------------------------------------------------------ Slider picker */
-/* One slider on the start screen. This reads as the field's label until you use it. */
-.slider-pick {
-  appearance: none;
-  font-family: var(--practicex-font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--practicex-fog);
+/* Two settings, side by side, each showing what it is currently set to. The one you tap takes the
+   slider below it. Equal widths, so the pair never shifts when a value gets longer or shorter. */
+.pickers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.picker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 12px;
+  text-align: left;
+  cursor: pointer;
   border: 1px solid var(--practicex-slate-line);
   border-radius: var(--practicex-radius-button);
-  padding: 5px 20px 5px 9px;
-  margin: 0;
-  line-height: 1.2;
-  cursor: pointer;
-  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
-  background-color: rgba(255, 255, 255, 0.05);
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
-    linear-gradient(135deg, currentColor 50%, transparent 50%),
-    linear-gradient(180deg, rgba(255, 217, 194, 0.12), rgba(255, 217, 194, 0));
-  background-position: calc(100% - 10px) 56%, calc(100% - 6px) 56%, 0 0;
-  background-size: 4px 4px, 4px 4px, 100% 100%;
-  background-repeat: no-repeat;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background-color 0.18s ease, border-color 0.18s ease;
 }
-.slider-pick:hover {
-  color: var(--practicex-bone);
+.picker:hover { background: rgba(255, 255, 255, 0.07); border-color: var(--practicex-mist); }
+.picker:focus-visible { outline: 2px solid var(--practicex-fog); outline-offset: 2px; }
+/* The chosen one owns the slider underneath, so it is lit and joined to it by the coral edge. */
+.picker.on {
   border-color: var(--practicex-coral);
-  background-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 122, 77, 0.1);
 }
-.slider-pick:focus-visible { outline: 2px solid var(--practicex-fog); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { .slider-pick { transition: none; } }
-.slider-pick option {
-  font-family: var(--practicex-font-text);
-  font-size: 13px;
-  letter-spacing: 0;
-  text-transform: none;
-  background: var(--practicex-slate-raised);
-  color: var(--practicex-fog);
+.picker-key {
+  font-family: var(--practicex-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--practicex-mist);
+  line-height: 1;
 }
+.picker.on .picker-key { color: var(--practicex-peach); }
+/* A fixed line box: the pill an end-of-scale name earns must not make the pair a pixel taller. */
+.picker-val {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The two readouts keep their own character inside the button: the count counts, the band is named
+   in the colour it lands on. Both are left-aligned here, not right, so they line up with the label. */
+.picker .count-readout {
+  font-size: 17px;
+  transform-origin: left center;
+  transform: none;
+}
+.picker .diff-readout { font-size: 14px; }
+.picker .diff-readout.unlocked { padding: 2px 8px; }
+
+.slider-tip {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--practicex-cloud);
+}
+.slider-tip b { color: var(--practicex-mist); font-weight: 600; }
 
 /* ------------------------------------------------------------------ Working the figure */
 .diagram-bar { display: flex; align-items: center; gap: 10px; width: 100%; }

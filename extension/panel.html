@@ -57,16 +57,15 @@
           <p class="hint" id="class-hint"></p>
         </div>
         <div class="field slider-field" id="slider-field">
-          <div class="row-label">
-            <select class="slider-pick" id="slider-pick" aria-label="What the slider sets">
-              <option value="count">Problems</option>
-              <option value="difficulty">Difficulty</option>
-              <option value="answers">Answer type</option>
-            </select>
-            <span class="readout-stack">
-              <span class="count-readout mono" id="count-readout">3</span>
-              <span class="diff-readout" id="diff-readout">Same</span>
-            </span>
+          <div class="pickers" role="tablist" aria-label="What the slider sets">
+            <button type="button" class="picker" id="pick-count" data-slider="count" role="tab" aria-selected="true" aria-controls="count-body">
+              <span class="picker-key">Problems</span>
+              <span class="picker-val count-readout mono" id="count-readout">3</span>
+            </button>
+            <button type="button" class="picker" id="pick-difficulty" data-slider="difficulty" role="tab" aria-selected="false" aria-controls="diff-body">
+              <span class="picker-key">Difficulty</span>
+              <span class="picker-val diff-readout" id="diff-readout">Same</span>
+            </button>
           </div>
           <div class="slider-stack">
             <div class="slider-body" id="count-body">
@@ -88,9 +87,8 @@
               </div>
             </div>
           </div>
+          <p class="slider-tip">* Tap <b>Problems</b> or <b>Difficulty</b> above to choose which one the slider sets.</p>
           <div class="current-settings" id="current-settings">
-            <div class="cs-cell"><span class="cs-key">Difficulty</span><span class="cs-val" id="cs-difficulty">Same</span></div>
-            <div class="cs-cell"><span class="cs-key">Problem #</span><span class="cs-val mono" id="cs-count">3</span></div>
             <div class="cs-cell"><span class="cs-key">Explanation</span><span class="cs-val" id="cs-verbosity">Standard</span></div>
           </div>
         </div>
