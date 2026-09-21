@@ -22,6 +22,7 @@
     <header class="head">
       <img class="mark" src="logo/icon.svg" width="28" height="28" alt="">
       <span class="wordmark">Practice<span class="x">X</span></span>
+      <p class="usage" id="usage" hidden><span id="usage-main"></span><span class="usage-tail" id="usage-tail"></span></p>
       <div class="head-tools">
         <button class="icon-btn" id="open-history" title="Your progress" aria-label="Your progress">
           <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 16.5V11M8 16.5V7M12 16.5v-6M16 16.5V3.5"/></svg>
@@ -32,13 +33,10 @@
       </div>
     </header>
 
-    <p class="usage" id="usage" hidden><span id="usage-main"></span></p>
-
     <p class="notice" id="notice" hidden></p>
 
     <!-- Start -->
     <section class="view" id="view-start" hidden>
-      <p class="lede">Screenshot a question, get new practice problems like it.</p>
       <div class="controls">
         <div class="field" id="class-field">
           <div class="row-label">
@@ -90,11 +88,9 @@
           <p class="slider-tip">* Tap <b>Problems</b> or <b>Difficulty</b> above to choose which one the slider sets.</p>
           <div class="current-settings" id="current-settings">
             <div class="cs-cell"><span class="cs-key">Explanation</span><span class="cs-val" id="cs-verbosity">Standard</span></div>
+            <button class="btn primary" id="generate">Screenshot</button>
           </div>
         </div>
-      </div>
-      <div class="actions">
-        <button class="btn primary" id="generate">Screenshot</button>
       </div>
       <div class="first-run" id="first-run" hidden>
         <span class="label">How it works</span>

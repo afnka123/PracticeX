@@ -261,10 +261,14 @@ function renderUsage() {
   box.classList.toggle("out", out);
   box.classList.toggle("low", !out && left <= Math.max(3, Math.round(usage.limit * 0.05)));
   const resets = usage.resets_at ? formatTime(usage.resets_at) : "";
-  if (out) {
-    $("usage-main").textContent = resets ? `No questions left until ${resets}` : "No questions left this hour";
+  // It shares the header row with the wordmark and the two tools, so it is said short, and the tail
+  // drops entirely on a narrow panel. The full sentence, cap and reset time are on the tooltip.
+  if (out && resets) {
+    $("usage-main").textContent = `None left until ${resets}`;
+    $("usage-tail").textContent = "";
   } else {
-    $("usage-main").textContent = `${left} question${left === 1 ? "" : "s"} left this hour`;
+    $("usage-main").textContent = out ? "None left" : `${left} left`;
+    $("usage-tail").textContent = " this hour";
   }
   box.title = `${left} of ${usage.limit} questions this hour.${resets ? ` The count resets at ${resets}.` : ""}`;
   // Everything that would spend a question says so rather than failing on the server.

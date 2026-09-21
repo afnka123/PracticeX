@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PracticeX",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Reads the question on your screen (math, science, writing or languages) and writes new practice problems of the same type.",
   "minimum_chrome_version": "116",
   "icons": {
