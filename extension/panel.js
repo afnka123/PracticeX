@@ -3,9 +3,6 @@ import { parsePartialJson } from "./partial-json.js";
 
 const MAX_IMAGE_SIDE = 1568; // larger images are downscaled by the model provider anyway
 const PAGE_ID = crypto.randomUUID(); // tells this page's own storage writes apart from other windows'
-const PARAMS = new URLSearchParams(location.search);
-const FOCUS = PARAMS.has("focus"); // fullscreen practice window
-const CROP = PARAMS.has("crop"); // large window used only to select the problem on a screenshot
 // Unpacked (developer) builds have no update_url. Only they show the model, server and founder settings.
 const DEV = !("update_url" in chrome.runtime.getManifest());
 // The deployed server. Set this to the Render URL before packing; developer builds keep talking to
@@ -56,7 +53,7 @@ let state = {
   image: null, // last cropped screenshot, for "More like these"
   prereq: null, // { topic, data, streaming, live }
 };
-let prefs = { textScale: 1, count: 3, verbosity: "standard", answerMix: 100, courseId: "", slider: "count" };
+let prefs = { textScale: 1, count: 3, verbosity: "standard", courseId: "", slider: "count" };
 const VERBOSITY_HINTS = {
   brief: "Just the key move and the math.",
   standard: "",
@@ -67,7 +64,6 @@ let settings = { serverUrl: DEFAULT_SERVER, founderToken: "" };
 let installId = "";
 let config = null;
 let shot = null; // { dataUrl, sel: {x, y, w, h} in 0..1 or null, requester }
-let cropWindowId = null;
 let viewBeforeCrop = "start";
 let viewBeforeHistory = "start";
 let viewBeforeSettings = "start";
@@ -91,7 +87,6 @@ async function loadStorage() {
   if (!DEV) settings.serverUrl = DEFAULT_SERVER;
   prefs = { ...prefs, ...(local.prefs || {}) };
   // The written/choices pair used to be two buttons; it is a slider now, so old prefs land on an end.
-  if (typeof prefs.answerMix !== "number") prefs.answerMix = prefs.answerFormat === "multiple_choice" ? 0 : 100;
   const session = await chrome.storage.session.get("state");
   if (session.state) state = { ...state, ...session.state.data };
   state.problems = state.problems.map((p) => ({ ...p, steps: toSteps(p.steps) })); // sessions saved before step titles
@@ -108,7 +103,7 @@ async function loadStorage() {
   }
 }
 
-const TRANSIENT_VIEWS = ["crop", "settings", "waiting", "history"];
+const TRANSIENT_VIEWS = ["crop", "settings", "history"];
 
 function save() {
   chrome.storage.session.set({ state: { writer: PAGE_ID, data: state } });
@@ -135,34 +130,13 @@ function watchStorage() {
     }
     if (area !== "session") return;
 
-    // The crop window finished: generate from its selection.
-    const crop = changes.cropResult?.newValue;
-    if (crop?.requester === PAGE_ID) {
-      chrome.storage.session.remove("cropResult");
-      cropWindowId = null;
-      generate(crop.image);
-      return;
-    }
-
-    // Keep the side panel and the focus window on the same problem.
+    // One side panel per browser window: keep a second window's panel on the same problem.
     if (!changes.state?.newValue) return;
     const { writer, data } = changes.state.newValue;
     if (writer === PAGE_ID || state.streaming || state.prereq?.streaming) return;
     if (TRANSIENT_VIEWS.includes(state.view)) return; // do not yank the student mid-task
     state = { ...state, ...data };
     renderCurrent({ quiet: true });
-  });
-
-  chrome.windows.onRemoved.addListener((id) => {
-    if (id !== cropWindowId) return;
-    cropWindowId = null;
-    // Closed without a selection (a selection, if any, arrives before the window closes).
-    setTimeout(() => {
-      if (state.view === "waiting") {
-        state.view = viewBeforeCrop;
-        renderCurrent();
-      }
-    }, 300);
   });
 }
 
@@ -564,7 +538,7 @@ function show(view, { quiet = false } = {}) {
   for (const section of document.querySelectorAll(".view")) {
     section.hidden = section.id !== `view-${view}`;
   }
-  if (!quiet && !CROP && !["crop", "waiting"].includes(view)) save();
+  if (!quiet && view !== "crop") save();
 }
 
 function renderCurrent(opts) {
@@ -593,7 +567,7 @@ function applyTextScale() {
 const DIFFICULTY_BANDS = [
   [15, "Very easy", "Much simpler than the question you screenshot."],
   [37, "Easy", "A step simpler than the question you screenshot."],
-  [63, "Medium", "The same level as the question you screenshot."],
+  [63, "Same", "The same level as the question you screenshot."],
   [85, "Hard", "A step up from the question you screenshot."],
   [100, "Very hard", "Well above the question you screenshot."],
 ];
@@ -669,57 +643,11 @@ function applyDifficulty({ animate = false } = {}) {
   renderCurrentSettings();
 }
 
-// Answer style is a leaning, not a switch: 0 is every question multiple choice, 100 is every question
-// written, and the middle asks for a mix. Only the two ends map cleanly onto one server format.
-const ANSWER_BANDS = [
-  [10, "Choices", "Every question multiple choice."],
-  [35, "Lean choices", "Mostly multiple choice, some written."],
-  [65, "Either", "A mix of multiple choice and written."],
-  [90, "Lean written", "Mostly written, some multiple choice."],
-  [100, "Written", "Every question written out."],
-];
 
-function answerMix() {
-  const v = prefs.answerMix;
-  return typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 100;
-}
-
-function answerBand(mix) {
-  return ANSWER_BANDS.find(([top]) => mix <= top) || ANSWER_BANDS[ANSWER_BANDS.length - 1];
-}
-
-// What the server is actually asked for. The ends are the two formats it has always taken.
-function answerFormat(mix = answerMix()) {
-  return mix <= 10 ? "multiple_choice" : mix >= 90 ? "free" : "mixed";
-}
-
-function applyAnswers({ animate = false } = {}) {
-  const mix = answerMix();
-  const [, word, means] = answerBand(mix);
-  const field = $("slider-field");
-  $("answer-mix").value = mix;
-  field.style.setProperty("--at", mix / 100);
-  // Indigo when it leans on choices, peach when it leans on written, grey in the middle.
-  const off = Math.abs(mix - 50) / 50;
-  field.style.setProperty("--acolor", mix < 50 ? `hsl(224, ${30 + off * 30}%, ${64 + off * 4}%)` : `hsl(24, ${20 + off * 55}%, ${68 + off * 6}%)`);
-  $("ans-readout").textContent = word;
-  $("answer-mix").setAttribute("aria-valuetext", means);
-  $("ans-body").title = means;
-  const near = mix <= 33 ? 0 : mix >= 67 ? 2 : 1;
-  [...$("ans-ticks").children].forEach((t, k) => t.classList.toggle("current", k === near));
-  if (animate) {
-    const node = $("ans-wrap");
-    node.classList.remove("pop");
-    void node.offsetWidth; // restart the animation
-    node.classList.add("pop");
-  }
-  renderCurrentSettings();
-}
-
-const SLIDERS = ["count", "difficulty", "answers"];
-const SLIDER_BODY = { count: "count-body", difficulty: "diff-body", answers: "ans-body" };
+const SLIDERS = ["count", "difficulty"];
+const SLIDER_BODY = { count: "count-body", difficulty: "diff-body" };
 // Verbosity has no readout: the segmented control already shows which one is on.
-const SLIDER_READOUT = { count: "count-readout", difficulty: "diff-readout", answers: "ans-readout" };
+const SLIDER_READOUT = { count: "count-readout", difficulty: "diff-readout" };
 
 // The three bodies sit in one grid cell so the field never changes height, and the one on top
 // fades in rather than snapping: nothing below it moves when you switch.
@@ -763,7 +691,6 @@ function renderCurrentSettings() {
   $("cs-difficulty").textContent = word;
   $("cs-difficulty").style.color = difficultyColor(level);
   $("cs-count").textContent = prefs.count;
-  $("cs-answers").textContent = answerBand(answerMix())[1];
   $("cs-verbosity").textContent = prefs.verbosity.charAt(0).toUpperCase() + prefs.verbosity.slice(1);
 }
 
@@ -794,7 +721,6 @@ function renderStart(opts) {
   renderModels();
   applyDifficulty();
   applyCount();
-  applyAnswers();
   renderVerbosity();
   renderSliderPick();
   renderClasses();
@@ -815,39 +741,20 @@ async function capture() {
   }
   let dataUrl;
   try {
-    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+    // The side panel sits inside the browser window, so its own window is the one to photograph.
+    const win = await chrome.windows.getCurrent();
     dataUrl = await chrome.tabs.captureVisibleTab(win.id, { format: "jpeg", quality: 92 });
   } catch {
     notice("Chrome does not allow screenshots of this page. Open the problem in a normal tab and try again.");
     return;
   }
 
-  if (FOCUS || window.innerWidth >= FOCUS_WIDTH) {
-    // The window is already big enough to select in, so no second window is needed.
-    shot = { dataUrl, sel: null };
-    $("shot").src = dataUrl;
-    $("crop-box").hidden = true;
-    if (state.view !== "crop") viewBeforeCrop = state.view;
-    show("crop");
-    return;
-  }
-
-  // The panel window is too narrow to select comfortably: open one that fills most of the screen.
-  await chrome.storage.session.set({ pendingShot: { dataUrl, requester: PAGE_ID } });
-  const width = Math.round(screen.availWidth * 0.94);
-  const height = Math.round(screen.availHeight * 0.94);
-  const win = await chrome.windows.create({
-    url: chrome.runtime.getURL("panel.html?crop=1"),
-    type: "popup",
-    width,
-    height,
-    left: Math.round((screen.availLeft || 0) + (screen.availWidth - width) / 2),
-    top: Math.round((screen.availTop || 0) + (screen.availHeight - height) / 2),
-    focused: true,
-  });
-  cropWindowId = win?.id ?? null;
-  if (state.view !== "waiting") viewBeforeCrop = state.view;
-  show("waiting", { quiet: true });
+  // The side panel crops in place. There is no second window to open and nothing to hand over.
+  shot = { dataUrl, sel: null };
+  $("shot").src = dataUrl;
+  $("crop-box").hidden = true;
+  if (state.view !== "crop") viewBeforeCrop = state.view;
+  show("crop");
 }
 
 // ---------------------------------------------------------------- crop
@@ -920,21 +827,10 @@ async function send(useSelection) {
   }
   notice("");
   const image = await cropToJpeg(shot.dataUrl, useSelection ? shot.sel : null);
-  if (CROP) {
-    // Hand the selection back to the panel that asked for it, then get out of the way.
-    await chrome.storage.session.set({ cropResult: { requester: shot.requester, image, at: Date.now() } });
-    await chrome.storage.session.remove("pendingShot");
-    window.close();
-    return;
-  }
   generate(image);
 }
 
 function cancelCrop() {
-  if (CROP) {
-    window.close();
-    return;
-  }
   notice("");
   shot = null;
   state.view = viewBeforeCrop;
@@ -1018,7 +914,7 @@ async function generate(image) {
   const controller = new AbortController();
   generation = controller;
   const before = structuredClone(state);
-  if (["waiting", "crop"].includes(before.view)) before.view = viewBeforeCrop;
+  if (before.view === "crop") before.view = viewBeforeCrop;
   notice("");
   shot = null;
   Object.assign(state, {
@@ -1070,8 +966,7 @@ async function generate(image) {
         difficulty: state.difficulty,
         count: prefs.count,
         verbosity: prefs.verbosity,
-        answer_format: answerFormat(),
-        answer_mix: answerMix(),
+        answer_format: "auto",
       },
       (delta) => {
         text += delta;
@@ -1274,6 +1169,27 @@ async function makeDiagram() {
   }
 }
 
+// What the panel says while a question is being written. It follows the field the model is on, so
+// the wait reads as work happening rather than one line that sits there.
+const WRITING_NOTES = {
+  question: "Writing the question",
+  options: "Laying out the choices",
+  answer: "Working out the answer",
+  accepted_answers: "Noting the ways to write it",
+  approach: "Explaining the approach",
+  steps: "Writing the working, step by step",
+  check: "Checking the answer against the question",
+  common_mistake: "Naming the mistake to avoid",
+  diagram: "Drawing the figure",
+};
+
+function writingNote(i) {
+  if (!state.problems.length) return "Reading what is on screen";
+  const p = state.problems[i];
+  if (!p) return `Question ${i + 1} is next in line`;
+  return WRITING_NOTES[p._live] || (state.subject ? `Building a ${state.subject} set` : "Putting the set together");
+}
+
 function renderProblem(opts) {
   const i = state.index;
   const p = state.problems[i];
@@ -1288,6 +1204,7 @@ function renderProblem(opts) {
 
   $("typing").hidden = !writing;
   $("typing-label").textContent = !state.problems.length ? "Reading the problem" : `Writing question ${i + 1}`;
+  $("typing-note").textContent = writingNote(i);
   $("question").hidden = writing;
   if (p) setRich($("question"), p.question, p._live === "question");
   renderDiagramArea(i, p);
@@ -1873,7 +1790,7 @@ function historyEntry() {
 
 // Called from save(). Writes are batched, since save() runs on every keystroke in the answer box.
 function recordHistory() {
-  if (CROP || state.streaming || !state.setId || !state.problems.length) return;
+  if (state.streaming || !state.setId || !state.problems.length) return;
   pendingHistory.set(state.setId, historyEntry());
   clearTimeout(historyTimer);
   historyTimer = setTimeout(flushHistory, 400);
@@ -1962,7 +1879,11 @@ function setRow(h, nested = false) {
 }
 
 function renderRecent() {
-  $("recent").hidden = history.length === 0;
+  const empty = history.length === 0;
+  $("recent").hidden = empty;
+  // Nothing to look back on yet, so the room under the button explains the thing instead of
+  // sitting blank.
+  $("first-run").hidden = !empty;
   $("recent-sets").replaceChildren(...history.slice(0, 3).map((h) => setRow(h)));
 }
 
@@ -2278,30 +2199,11 @@ async function saveSettings() {
   }
 }
 
-// ---------------------------------------------------------------- focus mode
+// The roomier layout turns on by width, however wide the student has dragged the side panel.
+const WIDE_LAYOUT = 720;
 
-// PracticeX has its own window now, so focus mode grows that window instead of opening a second one.
-const FOCUS_WIDTH = 860; // at this width the panel switches to the roomier focus layout
-
-async function toggleFocus() {
-  if (FOCUS) {
-    window.close(); // a focus window from an older version
-    return;
-  }
-  save();
-  try {
-    const win = await chrome.windows.getCurrent();
-    const big = win.state === "fullscreen" || win.state === "maximized";
-    await chrome.windows.update(win.id, { state: big ? "normal" : "fullscreen" });
-  } catch {}
-}
-
-// The focus layout follows the window, however it got that big.
 function applyWindowSize() {
-  if (CROP) return;
-  const big = FOCUS || window.innerWidth >= FOCUS_WIDTH;
-  document.body.classList.toggle("focus", big);
-  $("toggle-focus").title = big ? "Leave focus mode" : "Focus mode";
+  document.body.classList.toggle("focus", window.innerWidth >= WIDE_LAYOUT);
 }
 
 // ---------------------------------------------------------------- boot
@@ -2333,12 +2235,6 @@ function bind() {
   });
   // A settle at the end of the drag, not a bulge on every pixel of it.
   $("difficulty").addEventListener("change", () => applyDifficulty({ animate: true }));
-  $("answer-mix").addEventListener("input", (e) => {
-    prefs.answerMix = Number(e.target.value);
-    applyAnswers();
-    savePrefs();
-  });
-  $("answer-mix").addEventListener("change", () => applyAnswers({ animate: true }));
   $("slider-pick").addEventListener("change", (e) => {
     prefs.slider = e.target.value;
     savePrefs();
@@ -2369,26 +2265,17 @@ function bind() {
     fitInlineMath(document.body);
     savePrefs();
   });
-  $("toggle-focus").addEventListener("click", toggleFocus);
-  if (FOCUS || CROP) {
-    document.addEventListener("keydown", (e) => {
-      if (["INPUT", "SELECT"].includes(document.activeElement?.tagName)) return;
-      if (e.key === "Escape") window.close();
-      if (CROP && e.key === "Enter") send(Boolean(shot?.sel));
-    });
-  }
+  document.addEventListener("keydown", (e) => {
+    if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+    if (state.view !== "crop") return;
+    if (e.key === "Escape") cancelCrop();
+    if (e.key === "Enter") send(Boolean(shot?.sel));
+  });
 
   setupCrop();
   $("send-crop").addEventListener("click", () => send(true));
   $("send-whole").addEventListener("click", () => send(false));
   $("cancel-crop").addEventListener("click", cancelCrop);
-  $("cancel-waiting").addEventListener("click", () => {
-    if (cropWindowId != null) chrome.windows.remove(cropWindowId).catch(() => {});
-    cropWindowId = null;
-    state.view = viewBeforeCrop;
-    renderCurrent();
-  });
-
   $("attempt").addEventListener("input", (e) => {
     state.attempts[state.index] = e.target.value;
     noteTyping();
@@ -2436,18 +2323,6 @@ function bind() {
   $("save-settings").addEventListener("click", saveSettings);
 }
 
-async function initCropWindow() {
-  document.body.classList.add("crop-mode");
-  const { pendingShot } = await chrome.storage.session.get("pendingShot");
-  if (!pendingShot) {
-    window.close();
-    return;
-  }
-  shot = { dataUrl: pendingShot.dataUrl, sel: null, requester: pendingShot.requester };
-  $("shot").src = shot.dataUrl;
-  show("crop", { quiet: true });
-}
-
 async function init() {
   bind();
   applyWindowSize();
@@ -2458,15 +2333,13 @@ async function init() {
   applyTextScale();
   applyDifficulty();
   applyCount();
-  applyAnswers();
   renderVerbosity();
-  if (CROP) {
-    await initCropWindow();
-    return;
-  }
   watchStorage();
   await loadConfig();
   renderCurrent();
+  // The opening card fades itself out; drop it from the page once it has, so nothing is left
+  // sitting over the panel.
+  setTimeout(() => $("splash")?.remove(), 1600);
 }
 
 init();

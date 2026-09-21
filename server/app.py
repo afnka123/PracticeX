@@ -322,9 +322,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "Screenshot is empty.")
         difficulty = llm.difficulty_level(body.get("difficulty", 50))
         verbosity = self._verbosity(body)
-        answer_format = body.get("answer_format", "free")
+        answer_format = body.get("answer_format", "auto")
         if answer_format not in llm.FORMATS:
-            answer_format = "free"
+            answer_format = "auto"
         answer_mix = body.get("answer_mix", 50)
         if not isinstance(answer_mix, (int, float)) or isinstance(answer_mix, bool):
             answer_mix = 50

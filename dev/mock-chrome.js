@@ -1,9 +1,8 @@
 // Mocks the chrome.* APIs the panel uses so it can run as a normal page.
-// Storage lives in localStorage so several preview tabs (panel, focus window, crop window) share it the way
-// extension pages do. ?focus=1 previews focus mode; the crop window opens as ?crop=1 in a new tab.
+// Storage lives in localStorage so it behaves the way an extension page's does across reloads.
 (() => {
   const listeners = [];
-  const isChild = /[?&](crop|focus)=/.test(location.search);
+  const isChild = false; // the side panel is the only surface now
   const prefix = (area) => `mock-chrome:${area}:`;
 
   // A fresh panel starts a fresh browser session.
@@ -70,7 +69,7 @@
     permissions: { request: async () => true },
     windows: {
       getLastFocused: async () => ({ id: 1, left: 0, top: 0, width: 1440, height: 900 }),
-      getCurrent: async () => ({ id: nextWindow, state: "normal" }),
+      getCurrent: async () => ({ id: 1, state: "normal" }),
       update: async () => {},
       create: async ({ url }) => {
         window.open(url.replace("chrome-extension://mock/", "/dev/preview.html"), "_blank");

@@ -170,7 +170,7 @@ class ServerTest(unittest.TestCase):
 
     def test_answer_format(self):
         for sent, expected in [("multiple_choice", "multiple_choice"), ("free", "free"), ("mixed", "mixed"),
-                               ("quiz", "free"), (None, "free")]:
+                               ("auto", "auto"), ("quiz", "auto"), (None, "auto")]:
             _, data, _ = self.call("/v1/generate", {"image": IMAGE, "media_type": "image/jpeg", "answer_format": sent})
             self.assertEqual(data["answer_format"], expected, sent)
             app.limiter = app.HourlyLimiter()

@@ -307,7 +307,15 @@ body.focus .input { font-size: 15px; padding: 11px 14px; }
   line-height: 0;
 }
 .crop img { width: 100%; display: block; pointer-events: none; }
-.crop-bar { display: flex; flex-direction: column; gap: 16px; }
+.crop-bar { display: flex; flex-direction: column; gap: 10px; }
+.crop-bar .actions { display: flex; gap: 8px; }
+.crop-bar .actions .btn { flex: 1; padding: 11px 8px; font-size: 13px; }
+.ghost-btn {
+  background: transparent;
+  border: 1px solid var(--practicex-slate-line);
+  color: var(--practicex-mist);
+}
+.ghost-btn:hover { color: var(--practicex-fog); border-color: var(--practicex-mist); }
 .crop-box {
   position: absolute;
   border: 1.5px solid var(--practicex-bone);
@@ -315,8 +323,36 @@ body.focus .input { font-size: 15px; padding: 11px 14px; }
   border-radius: 3px;
 }
 
-/* Streaming */
-.typing { display: flex; align-items: center; gap: 10px; }
+/* Streaming. The card shows the set taking shape rather than one blinking line. */
+.typing { display: flex; flex-direction: column; gap: 12px; }
+.typing-head { display: flex; align-items: center; gap: 10px; }
+.typing-mark {
+  display: inline-flex;
+  color: var(--practicex-coral);
+  animation: nib 1.9s ease-in-out infinite;
+}
+@keyframes nib {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(2px, -1px) rotate(-6deg); }
+  60% { transform: translate(-1px, 1px) rotate(4deg); }
+}
+.typing-note { font-size: 12.5px; color: var(--practicex-mist); margin: 0; }
+.skeleton { display: flex; flex-direction: column; gap: 9px; }
+.sk-line {
+  height: 11px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.13) 50%,
+    rgba(255, 255, 255, 0.05) 100%
+  );
+  background-size: 220% 100%;
+  animation: sweep 1.6s ease-in-out infinite;
+}
+.sk-line:nth-child(2) { animation-delay: 0.18s; }
+.sk-line.short { width: 58%; animation-delay: 0.36s; }
+@keyframes sweep { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
 .dots { display: inline-flex; gap: 4px; }
 .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--practicex-mist); animation: dot 1.2s ease-in-out infinite; }
 .dots i:nth-child(2) { animation-delay: 0.15s; }
@@ -467,14 +503,6 @@ body.focus .input { font-size: 15px; padding: 11px 14px; }
 .videos a:hover { text-decoration-color: var(--practicex-fog); }
 .videos .src { font-family: var(--practicex-font-mono); font-size: 10px; letter-spacing: 0.16em; color: var(--practicex-mist); margin-left: 6px; text-transform: uppercase; }
 
-/* Crop window: the screenshot fills almost the whole screen so the selection is easy to see */
-body.crop-mode .panel { max-width: none; min-height: 100vh; padding: 18px 28px 22px; gap: 14px; }
-body.crop-mode .head-tools, body.crop-mode .usage { display: none; }
-body.crop-mode #view-crop { flex: 1; gap: 12px; }
-body.crop-mode .crop { width: fit-content; max-width: 100%; margin: 0 auto; }
-body.crop-mode .crop img { width: auto; max-width: 100%; max-height: calc(100vh - 170px); }
-body.crop-mode .crop-bar { flex-direction: row; align-items: center; gap: 16px; flex-wrap: wrap; justify-content: center; }
-body.crop-mode .crop-bar .hint { max-width: 460px; }
 .card .segmented button[aria-checked="true"] { background: var(--practicex-slate); }
 
 /* 3D diagrams */
@@ -621,7 +649,10 @@ body {
 .help-sub { font-size: 12.5px; color: var(--practicex-mist); line-height: 1.4; }
 .help-arrow { flex: 0 0 auto; color: var(--practicex-mist); transition: transform 0.2s; }
 .help-card:hover .help-arrow { transform: translateX(3px); color: var(--practicex-fog); }
-.report-row { display: flex; justify-content: space-between; gap: 12px; margin-top: -4px; }
+.report-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: -4px; }
+/* Start over read as body text before; it is a control, so it looks like one. */
+.restart-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; font-size: 13px; }
+.restart-btn svg { flex: 0 0 auto; }
 
 /* "More like these", with the difficulty chosen right where the student decides they want more */
 .more-card { display: flex; flex-direction: column; gap: 8px; }
@@ -676,7 +707,7 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
 
 /* ------------------------------------------------------------------ Progress and history */
 .recent, .history-part { display: flex; flex-direction: column; gap: 8px; }
-.recent { margin-top: 8px; flex: 1; }
+.recent { margin-top: 8px; }
 .sets { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .set-row {
   display: flex;
@@ -1205,3 +1236,73 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
 
 /* The build number, quiet at the foot of Settings. */
 .version-line { align-self: flex-start; color: var(--practicex-cloud); }
+
+/* ------------------------------------------------------------------ Opening card */
+/* A beat on open so the panel does not snap into view mid-layout. It is not a loading screen:
+   the panel is built underneath while this is up, and it leaves on its own. */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--practicex-slate);
+  animation: splash-out 0.45s ease 1.05s forwards;
+}
+.splash-mark { animation: mark-in 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.splash-word {
+  font-family: var(--practicex-font-text);
+  font-weight: var(--practicex-wordmark-weight);
+  letter-spacing: var(--practicex-wordmark-tracking);
+  font-size: 27px;
+  color: var(--practicex-bone);
+  animation: rise 0.5s ease 0.16s both;
+}
+.splash-word .x { color: var(--practicex-coral); }
+.splash-tag { font-size: 12.5px; color: var(--practicex-mist); animation: rise 0.5s ease 0.28s both; }
+@keyframes mark-in {
+  from { opacity: 0; transform: scale(0.82) translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes splash-out { to { opacity: 0; visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) {
+  .splash { animation: splash-out 0.01s linear 0.2s forwards; }
+  .splash-mark, .splash-word, .splash-tag { animation: none; }
+  .typing-mark, .sk-line { animation: none; }
+}
+
+/* First run: the space under Generate carries the explanation rather than sitting empty. */
+.first-run {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 16px 16px 14px;
+  border-radius: var(--practicex-radius-card);
+  border: 1px solid var(--practicex-slate-line);
+  background: rgba(255, 255, 255, 0.022);
+}
+.steps-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.steps-list li { display: flex; align-items: flex-start; gap: 11px; font-size: 13.5px; line-height: 1.45; color: var(--practicex-fog); }
+.steps-list b { color: var(--practicex-bone); font-weight: 600; }
+.sn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--practicex-font-mono);
+  font-size: 11px;
+  color: var(--practicex-coral);
+  background: rgba(255, 122, 77, 0.13);
+}
+.first-run .hint { margin: 2px 0 0; }

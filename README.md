@@ -62,20 +62,16 @@ leaked key.
 
 ## How it works
 
-- **Its own window.** The toolbar icon opens PracticeX in a small window (460x700 by default) near the top
-  right of the browser window, not in Chrome's side panel, so it does not run the full height of the screen.
-  It floats over any tab, survives tab switches, and can be moved and resized; `background.js` remembers
-  where it was left and reopens it there. Clicking the icon again brings the open window back to the front
-  instead of making a second one. The focus button (four corners) makes that window fullscreen and back;
-  the roomier layout with larger type turns on by window width (860px and up), however the window got
-  that big.
+- **In the side panel.** The toolbar icon opens PracticeX in Chrome's side panel, beside the page. The
+  panel belongs to the browser window rather than to one tab, so switching tabs and coming back leaves it
+  open and exactly as it was, and there is no second window to manage. The student sets its width by
+  dragging its edge; the roomier layout with larger type turns on at 720px and up.
 - **Screenshot first.** Generate captures the visible tab of the last focused browser window. That needs the
   `<all_urls>` host permission, which is optional and requested on the first click.
-- **Crop in a big window.** The panel window is too narrow to select comfortably, so the screenshot opens
-  in a window that fills 94% of the screen (`panel.html?crop=1`). The student drags a box over the problem
-  and presses Generate (or Enter). The window sends the cropped image
-  back to the panel through `chrome.storage.session` and closes. Only the selected part is sent, which keeps
-  names, emails and other tabs' content off the network. A fullscreen panel crops in place.
+- **Crop in place.** The screenshot appears in the panel itself and the student drags a box over the
+  problem, then presses Generate (or Enter; Escape cancels). One surface, no second window to hand the
+  selection back from. Only the selected part is sent, which keeps names, emails and other tabs' content
+  off the network.
 - **Streaming.** `/v1/generate` and `/v1/prerequisite` send newline-delimited JSON events as the model
   writes: `meta` (usage), then `delta` pieces of the model's JSON, then `done` (the server-validated result)
   or `error`. `extension/partial-json.js` parses the unfinished JSON, and the panel fills in each field as
@@ -85,18 +81,20 @@ leaked key.
   the model call.
 - **Difficulty slider.** Continuous, 0 to 100, green at the easy end through amber to deep red at the hard
   one. The handle's ring and the word above it take the color of wherever it lands, and the nearest of the
-  Easy / Medium / Hard marks lights up. The panel names five bands (Very easy, Easy, Medium, Hard, Very
+  Easy / Same / Hard marks lights up. The panel names five bands (Very easy, Easy, Same, Hard, Very
   hard) and the server turns the same number into five graded instructions, from "small whole numbers, one
   or two steps" to "two extra steps, awkward numbers, or a twist". Everything is relative to the question on
-  screen, which the slider's tooltip says ("The same level as the question you screenshot"). The old
+  screen, so the middle band is called Same rather than Medium: it is the level of the question you
+  screenshot, which is what the slider's tooltip says. The old
   `easier` / `same` / `harder` strings still work and land on 25 / 50 / 75, so sets saved before the slider
   reopen at the right spot. **More like these** moves the slider 25 either way instead of jumping to a fixed
   step.
 - **1 to 5 problems per set.** Chosen with the Problems slider. One request returns every problem with its
   answer and a full worked solution: approach, titled steps, a check, and the common mistake. The student
   sees the answer only after clicking View answer, and the worked solution only after Show work.
-- **Answers** (start screen): Written or Choices (multiple choice), saved between sessions and sent with the
-  request. Multiple choice asks for exactly 4 options per question with one correct, the correct one in a
+- **Answers.** The model picks the format each question calls for: multiple choice where the skill is
+  recognising or discriminating, written where the student should produce the answer themselves, and
+  written when both would work. There is no setting for it. Multiple choice asks for exactly 4 options per question with one correct, the correct one in a
   different position across the set, and wrong options that are the usual mistakes. The panel then replaces
   the typing box with A-D buttons: clicking one answers it, checked locally with no request. A wrong pick
   is marked and disabled so the student can try again; the right one flashes green and reveals the answer.

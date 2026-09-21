@@ -390,6 +390,18 @@ any part of it. Math goes in \( ... \), chemistry in \(\ce{ ... }\) inside those
 
 # Sent with the request, like verbosity.
 FORMATS = {
+    "auto": (
+        "Answer format: you choose, question by question, whichever genuinely suits it. Multiple choice "
+        "where the skill is recognising or discriminating between answers, where the answer is a "
+        "category, a direction, a shift or a named thing, or where a written answer could not be typed "
+        "unambiguously. Written where the student should produce the answer themselves: computation, "
+        "solving, deriving, simplifying, translating, or explaining. When both would work, prefer "
+        "written. A multiple-choice question gets exactly 4 options in `options`, in order A, B, C, D, "
+        "with exactly one correct and `correct_option` set to its 0-based index; wrong options are the "
+        "results of the usual mistakes, never joke answers and never 'none of the above'. A written "
+        "question sets options to [] and correct_option to null. Do not put options inside the question "
+        "text. Vary which position is correct across the set."
+    ),
     "mixed": (
         "Answer format: a mix. Roughly {share}% of the questions are multiple choice and the rest are "
         "written, chosen so the format suits each question. A multiple-choice question gets exactly 4 "
@@ -673,7 +685,7 @@ def format_rule(answer_format, answer_mix=50):
     return rule
 
 
-def generate(model, image_b64, media_type, difficulty, count, verbosity="standard", answer_format="free", answer_mix=50):
+def generate(model, image_b64, media_type, difficulty, count, verbosity="standard", answer_format="auto", answer_mix=50):
     """Generator: yields text deltas, returns the cleaned result."""
     parts = [
         {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{image_b64}"}},
@@ -692,7 +704,7 @@ def generate(model, image_b64, media_type, difficulty, count, verbosity="standar
     return shape_generated(data, count, answer_format)
 
 
-def shape_generated(data, count, answer_format="free"):
+def shape_generated(data, count, answer_format="auto"):
     """Validates the model's set. The diagram rules are enforced here, not just requested in the prompt."""
     subject = data.get("subject") if data.get("subject") in SUBJECTS else "other"
     problems = [
@@ -706,7 +718,7 @@ def shape_generated(data, count, answer_format="free"):
     }
 
 
-def _shape_problem(p, subject, answer_format="free"):
+def _shape_problem(p, subject, answer_format="auto"):
     figure_kind = p.get("figure_kind") if p.get("figure_kind") in ("drawing", "table") else "drawing"
     drawings_ok = subject not in NO_DIAGRAM_SUBJECTS
     useful = bool(p.get("diagram_useful")) and (drawings_ok or figure_kind == "table")
@@ -714,7 +726,7 @@ def _shape_problem(p, subject, answer_format="free"):
     if figure and figure["kind"] != "table" and not drawings_ok:
         figure = None  # a drawing for writing, language or history, sent against the rules
     options, correct = [], None
-    if answer_format in ("multiple_choice", "mixed"):
+    if answer_format in ("multiple_choice", "mixed", "auto"):
         options = [str(o)[:300] for o in p.get("options", []) if isinstance(o, str) and o.strip()][:6]
         correct = p.get("correct_option")
         if not (isinstance(correct, int) and not isinstance(correct, bool) and 0 <= correct < len(options)) or len(options) < 2:
