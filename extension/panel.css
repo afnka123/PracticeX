@@ -1202,3 +1202,6 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
 .diagram-btn .ico-table { display: none; }
 .diagram-btn[data-figure="table"] .ico-drawing { display: none; }
 .diagram-btn[data-figure="table"] .ico-table { display: block; }
+
+/* The build number, quiet at the foot of Settings. */
+.version-line { align-self: flex-start; color: var(--practicex-cloud); }

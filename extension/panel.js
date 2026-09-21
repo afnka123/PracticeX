@@ -2297,6 +2297,9 @@ async function initCropWindow() {
 async function init() {
   bind();
   applyWindowSize();
+  // Settings carries the version, so a student can answer "which build are you on?" without
+  // turning on Developer mode at chrome://extensions.
+  $("version-line").textContent = `PracticeX ${chrome.runtime.getManifest().version || "dev build"}`;
   await loadStorage();
   applyTextScale();
   applyDifficulty();

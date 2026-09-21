@@ -81,7 +81,7 @@
     },
     tabs: { captureVisibleTab: async () => fakeScreenshot() },
     runtime: {
-      getManifest: () => ({}), // no update_url: behaves like an unpacked build
+      getManifest: () => ({ version: "0.0.0-preview" }), // no update_url: behaves like an unpacked build
       getURL: (p) => "chrome-extension://mock/" + p.replace(/^panel\.html/, ""),
     },
   };
