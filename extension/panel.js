@@ -3,6 +3,9 @@ import { parsePartialJson } from "./partial-json.js";
 
 const MAX_IMAGE_SIDE = 1568; // larger images are downscaled by the model provider anyway
 const PAGE_ID = crypto.randomUUID(); // tells this page's own storage writes apart from other windows'
+const PARAMS = new URLSearchParams(location.search);
+const FOCUS = PARAMS.has("focus"); // fullscreen practice window
+const CROP = PARAMS.has("crop"); // large window used only to select the problem on a screenshot
 // Unpacked (developer) builds have no update_url. Only they show the model, server and founder settings.
 const DEV = !("update_url" in chrome.runtime.getManifest());
 // The deployed server. Set this to the Render URL before packing; developer builds keep talking to
@@ -53,7 +56,7 @@ let state = {
   image: null, // last cropped screenshot, for "More like these"
   prereq: null, // { topic, data, streaming, live }
 };
-let prefs = { textScale: 1, count: 3, verbosity: "standard", courseId: "", slider: "count" };
+let prefs = { textScale: 1, count: 3, verbosity: "standard", answerMix: 100, courseId: "", slider: "count" };
 const VERBOSITY_HINTS = {
   brief: "Just the key move and the math.",
   standard: "",
@@ -64,6 +67,7 @@ let settings = { serverUrl: DEFAULT_SERVER, founderToken: "" };
 let installId = "";
 let config = null;
 let shot = null; // { dataUrl, sel: {x, y, w, h} in 0..1 or null, requester }
+let cropWindowId = null;
 let viewBeforeCrop = "start";
 let viewBeforeHistory = "start";
 let viewBeforeSettings = "start";
@@ -86,8 +90,8 @@ async function loadStorage() {
   settings = { ...settings, ...(local.settings || {}) };
   if (!DEV) settings.serverUrl = DEFAULT_SERVER;
   prefs = { ...prefs, ...(local.prefs || {}) };
-  // The slider used to set the answer format too. An install left on that setting heals to Problems.
-  if (!SLIDERS.includes(prefs.slider)) prefs.slider = "count";
+  // The written/choices pair used to be two buttons; it is a slider now, so old prefs land on an end.
+  if (typeof prefs.answerMix !== "number") prefs.answerMix = prefs.answerFormat === "multiple_choice" ? 0 : 100;
   const session = await chrome.storage.session.get("state");
   if (session.state) state = { ...state, ...session.state.data };
   state.problems = state.problems.map((p) => ({ ...p, steps: toSteps(p.steps) })); // sessions saved before step titles
@@ -104,7 +108,7 @@ async function loadStorage() {
   }
 }
 
-const TRANSIENT_VIEWS = ["crop", "settings", "history"];
+const TRANSIENT_VIEWS = ["crop", "settings", "waiting", "history"];
 
 function save() {
   chrome.storage.session.set({ state: { writer: PAGE_ID, data: state } });
@@ -131,13 +135,34 @@ function watchStorage() {
     }
     if (area !== "session") return;
 
-    // One side panel per browser window: keep a second window's panel on the same problem.
+    // The crop window finished: generate from its selection.
+    const crop = changes.cropResult?.newValue;
+    if (crop?.requester === PAGE_ID) {
+      chrome.storage.session.remove("cropResult");
+      cropWindowId = null;
+      generate(crop.image);
+      return;
+    }
+
+    // Keep the side panel and the focus window on the same problem.
     if (!changes.state?.newValue) return;
     const { writer, data } = changes.state.newValue;
     if (writer === PAGE_ID || state.streaming || state.prereq?.streaming) return;
     if (TRANSIENT_VIEWS.includes(state.view)) return; // do not yank the student mid-task
     state = { ...state, ...data };
     renderCurrent({ quiet: true });
+  });
+
+  chrome.windows.onRemoved.addListener((id) => {
+    if (id !== cropWindowId) return;
+    cropWindowId = null;
+    // Closed without a selection (a selection, if any, arrives before the window closes).
+    setTimeout(() => {
+      if (state.view === "waiting") {
+        state.view = viewBeforeCrop;
+        renderCurrent();
+      }
+    }, 300);
   });
 }
 
@@ -261,14 +286,10 @@ function renderUsage() {
   box.classList.toggle("out", out);
   box.classList.toggle("low", !out && left <= Math.max(3, Math.round(usage.limit * 0.05)));
   const resets = usage.resets_at ? formatTime(usage.resets_at) : "";
-  // It shares the header row with the wordmark and the two tools, so it is said short, and the tail
-  // drops entirely on a narrow panel. The full sentence, cap and reset time are on the tooltip.
-  if (out && resets) {
-    $("usage-main").textContent = `None left until ${resets}`;
-    $("usage-tail").textContent = "";
+  if (out) {
+    $("usage-main").textContent = resets ? `No questions left until ${resets}` : "No questions left this hour";
   } else {
-    $("usage-main").textContent = out ? "None left" : `${left} left`;
-    $("usage-tail").textContent = " this hour";
+    $("usage-main").textContent = `${left} question${left === 1 ? "" : "s"} left this hour`;
   }
   box.title = `${left} of ${usage.limit} questions this hour.${resets ? ` The count resets at ${resets}.` : ""}`;
   // Everything that would spend a question says so rather than failing on the server.
@@ -308,75 +329,14 @@ function hideOpenMath(text) {
   return text.slice(0, cut);
 }
 
-// Anything still holding a delimiter or a chemistry macro has not been rendered yet.
-const RAW_MATH = /\\[([]|\\(?:ce|pu)\{/;
-// What tells real math from a price like "$40 for $5 each": a command, a script, or a grouping.
-const MATH_LIKE = /\\[a-zA-Z]|[\^_{}]/;
-
-// The prompt asks for \( ... \) and \[ ... \], but a model drops into $ ... $ or writes a formula
-// bare often enough to matter, and those delimiters are not configured: the source would sit on
-// screen as typed. Normalising here costs nothing and covers the cases we keep seeing.
-function normalizeMath(text) {
-  if (!/[$]|\\(?:ce|pu)\{/.test(text)) return text;
-  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (m, body) => `\\[${body}\\]`);
-  // Single dollars only when the body carries a command, so currency is left alone.
-  text = text.replace(/\$([^$\n]+?)\$/g, (m, body) => (MATH_LIKE.test(body) ? `\\(${body}\\)` : m));
-  return wrapBareChem(text);
-}
-
-// \ce{...} or \pu{...} written outside any delimiter, wrapped so MathJax sees it. Braces are matched
-// by counting rather than by regex, since a chemical formula nests them.
-function wrapBareChem(text) {
-  if (!/\\(?:ce|pu)\{/.test(text)) return text;
-  let out = "";
-  let i = 0;
-  while (i < text.length) {
-    const starts = [text.indexOf("\\(", i), text.indexOf("\\[", i)].filter((n) => n >= 0);
-    const next = starts.length ? Math.min(...starts) : -1;
-    out += wrapChemOutsideMath(text.slice(i, next < 0 ? text.length : next));
-    if (next < 0) break;
-    // Step over the math region untouched; an unclosed one runs to the end.
-    const close = text.indexOf(text[next + 1] === "(" ? "\\)" : "\\]", next + 2);
-    const end = close < 0 ? text.length : close + 2;
-    out += text.slice(next, end);
-    i = end;
-  }
-  return out;
-}
-
-function wrapChemOutsideMath(chunk) {
-  const re = /\\(?:ce|pu)\{/g;
-  let out = "";
-  let i = 0;
-  let m;
-  while ((m = re.exec(chunk))) {
-    let depth = 0;
-    let j = m.index + m[0].length - 1; // sits on the opening brace
-    for (; j < chunk.length; j++) {
-      if (chunk[j] === "{") depth++;
-      else if (chunk[j] === "}" && --depth === 0) break;
-    }
-    if (j >= chunk.length) break; // half-written while streaming: leave it for the next pass
-    out += chunk.slice(i, m.index) + `\\(${chunk.slice(m.index, j + 1)}\\)`;
-    i = j + 1;
-    re.lastIndex = i;
-  }
-  return out + chunk.slice(i);
-}
-
 // Model text is set with textContent (never innerHTML); MathJax then renders the \( \) and \[ \] parts.
 // Unchanged text is skipped, so re-rendering while streaming only touches the part that grew.
-// data-src is what should be on screen; data-typeset is what MathJax has actually rendered. They are
-// separate so that a pass which never ran — the bundle was still loading, or MathJax threw — is
-// retried instead of leaving the source on screen for the life of the panel.
 function setRich(node, text, live = false) {
-  text = normalizeMath(String(text || ""));
+  text = String(text || "");
   if (live) text = hideOpenMath(text);
   node.classList.toggle("live", live);
   if (node.dataset.src === text) return;
   node.dataset.src = text;
-  delete node.dataset.typeset;
-  delete node.dataset.mathTries;
   if (window.MathJax?.typesetClear) MathJax.typesetClear([node]);
   node.replaceChildren(
     ...text
@@ -402,11 +362,9 @@ function whenMathReady() {
     mathReady = new Promise((resolve) => {
       const look = () => {
         if (window.MathJax?.startup?.promise) return resolve(window.MathJax.startup.promise);
-        // Give up on this wait rather than hold the queue, but clear the cache so the next pass
-        // starts a fresh one: a bundle that lands late still gets its chance.
+        // Give up eventually rather than hold the queue: the LaTeX source still reads as text.
         if (Date.now() > deadline) {
-          console.warn("MathJax still not loaded; will retry");
-          mathReady = null;
+          console.warn("MathJax never loaded; showing LaTeX source");
           return resolve();
         }
         setTimeout(look, 50);
@@ -417,58 +375,13 @@ function whenMathReady() {
   return mathReady;
 }
 
-// One pass per node at a time. A pass reads data-src when it runs, so updates that arrive while it
-// is queued are picked up by that same pass instead of stacking another full typeset behind it.
 let typesetQueue = Promise.resolve();
-const queuedNodes = new Set();
-
 function typeset(node) {
-  scheduleMathHeal();
-  if (queuedNodes.has(node)) return;
-  queuedNodes.add(node);
   typesetQueue = typesetQueue
     .then(whenMathReady)
-    .then(() => {
-      queuedNodes.delete(node);
-      const want = node.dataset.src || "";
-      if (!node.isConnected || node.dataset.typeset === want) return;
-      // Leave data-typeset unset when the bundle is not up yet, so the sweep comes back to it.
-      if (!window.MathJax?.typesetPromise) return;
-      return MathJax.typesetPromise([node]).then(() => {
-        node.dataset.typeset = want;
-        fitInlineMath(node);
-      });
-    })
-    .catch((err) => {
-      queuedNodes.delete(node);
-      console.warn("MathJax:", err);
-    });
-}
-
-// Whatever the reason a pass did not land, the student must never be left reading LaTeX source.
-// This sweep finds nodes that still hold delimiters and tries them again, then stops once clean.
-let healTimer = null;
-function scheduleMathHeal() {
-  if (healTimer) return;
-  healTimer = setInterval(() => {
-    const stuck = [...document.querySelectorAll("[data-src]:not([data-typeset])")].filter((n) => n.isConnected);
-    if (!stuck.length) {
-      clearInterval(healTimer);
-      healTimer = null;
-      return;
-    }
-    for (const node of stuck) {
-      const src = node.dataset.src || "";
-      const tries = Number(node.dataset.mathTries || 0);
-      // Plain prose needs no pass, and a node that has failed repeatedly will not start working.
-      if (!RAW_MATH.test(src) || tries >= 4) {
-        node.dataset.typeset = src;
-        continue;
-      }
-      node.dataset.mathTries = String(tries + 1);
-      typeset(node);
-    }
-  }, 1200);
+    .then(() => window.MathJax?.typesetPromise?.([node]))
+    .then(() => fitInlineMath(node))
+    .catch((err) => console.warn("MathJax:", err));
 }
 
 function fitInlineMath(root) {
@@ -543,7 +456,7 @@ function show(view, { quiet = false } = {}) {
   for (const section of document.querySelectorAll(".view")) {
     section.hidden = section.id !== `view-${view}`;
   }
-  if (!quiet && view !== "crop") save();
+  if (!quiet && !CROP && !["crop", "waiting"].includes(view)) save();
 }
 
 function renderCurrent(opts) {
@@ -572,7 +485,7 @@ function applyTextScale() {
 const DIFFICULTY_BANDS = [
   [15, "Very easy", "Much simpler than the question you screenshot."],
   [37, "Easy", "A step simpler than the question you screenshot."],
-  [63, "Same", "The same level as the question you screenshot."],
+  [63, "Medium", "The same level as the question you screenshot."],
   [85, "Hard", "A step up from the question you screenshot."],
   [100, "Very hard", "Well above the question you screenshot."],
 ];
@@ -648,33 +561,70 @@ function applyDifficulty({ animate = false } = {}) {
   renderCurrentSettings();
 }
 
+// Answer style is a leaning, not a switch: 0 is every question multiple choice, 100 is every question
+// written, and the middle asks for a mix. Only the two ends map cleanly onto one server format.
+const ANSWER_BANDS = [
+  [10, "Choices", "Every question multiple choice."],
+  [35, "Lean choices", "Mostly multiple choice, some written."],
+  [65, "Either", "A mix of multiple choice and written."],
+  [90, "Lean written", "Mostly written, some multiple choice."],
+  [100, "Written", "Every question written out."],
+];
 
-const SLIDERS = ["count", "difficulty"];
-const SLIDER_BODY = { count: "count-body", difficulty: "diff-body" };
-const SLIDER_PICK = { count: "pick-count", difficulty: "pick-difficulty" };
+function answerMix() {
+  const v = prefs.answerMix;
+  return typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 100;
+}
 
-// Both settings are on screen at once, each on its own button with its current value, and the button
-// chooses which one the slider below sets. The two slider bodies sit in one grid cell, so the field
-// is always as tall as the taller of them and nothing under it moves when you switch; the one coming
-// in fades and lifts into place while the other fades out. Only the chosen one is focusable.
+function answerBand(mix) {
+  return ANSWER_BANDS.find(([top]) => mix <= top) || ANSWER_BANDS[ANSWER_BANDS.length - 1];
+}
+
+// What the server is actually asked for. The ends are the two formats it has always taken.
+function answerFormat(mix = answerMix()) {
+  return mix <= 10 ? "multiple_choice" : mix >= 90 ? "free" : "mixed";
+}
+
+function applyAnswers({ animate = false } = {}) {
+  const mix = answerMix();
+  const [, word, means] = answerBand(mix);
+  const field = $("slider-field");
+  $("answer-mix").value = mix;
+  field.style.setProperty("--at", mix / 100);
+  // Indigo when it leans on choices, peach when it leans on written, grey in the middle.
+  const off = Math.abs(mix - 50) / 50;
+  field.style.setProperty("--acolor", mix < 50 ? `hsl(224, ${30 + off * 30}%, ${64 + off * 4}%)` : `hsl(24, ${20 + off * 55}%, ${68 + off * 6}%)`);
+  $("ans-readout").textContent = word;
+  $("answer-mix").setAttribute("aria-valuetext", means);
+  $("ans-body").title = means;
+  const near = mix <= 33 ? 0 : mix >= 67 ? 2 : 1;
+  [...$("ans-ticks").children].forEach((t, k) => t.classList.toggle("current", k === near));
+  if (animate) {
+    const node = $("ans-wrap");
+    node.classList.remove("pop");
+    void node.offsetWidth; // restart the animation
+    node.classList.add("pop");
+  }
+  renderCurrentSettings();
+}
+
+const SLIDERS = ["count", "difficulty", "answers"];
+const SLIDER_BODY = { count: "count-body", difficulty: "diff-body", answers: "ans-body" };
+// Verbosity has no readout: the segmented control already shows which one is on.
+const SLIDER_READOUT = { count: "count-readout", difficulty: "diff-readout", answers: "ans-readout" };
+
+// The three bodies sit in one grid cell so the field never changes height, and the one on top
+// fades in rather than snapping: nothing below it moves when you switch.
 function renderSliderPick() {
   const which = SLIDERS.includes(prefs.slider) ? prefs.slider : "count";
+  $("slider-pick").value = which;
   for (const name of SLIDERS) {
     const on = name === which;
     const body = $(SLIDER_BODY[name]);
     body.classList.toggle("on", on);
     body.inert = !on;
-    const pick = $(SLIDER_PICK[name]);
-    pick.classList.toggle("on", on);
-    pick.setAttribute("aria-selected", String(on));
+    if (SLIDER_READOUT[name]) $(SLIDER_READOUT[name]).classList.toggle("on", on);
   }
-}
-
-function pickSlider(name) {
-  if (!SLIDERS.includes(name) || prefs.slider === name) return;
-  prefs.slider = name;
-  savePrefs();
-  renderSliderPick();
 }
 
 function applyCount({ animate = false } = {}) {
@@ -697,9 +647,15 @@ function applyCount({ animate = false } = {}) {
   renderCurrentSettings();
 }
 
-// Problems and Difficulty are on their own buttons now, so this row carries only what is not
-// already on screen.
+// One place that says what Generate will produce: the slider only shows one of these at a time,
+// and the explanation style lives over in settings.
 function renderCurrentSettings() {
+  const level = difficultyLevel();
+  const [, word] = difficultyBand(level);
+  $("cs-difficulty").textContent = word;
+  $("cs-difficulty").style.color = difficultyColor(level);
+  $("cs-count").textContent = prefs.count;
+  $("cs-answers").textContent = answerBand(answerMix())[1];
   $("cs-verbosity").textContent = prefs.verbosity.charAt(0).toUpperCase() + prefs.verbosity.slice(1);
 }
 
@@ -730,6 +686,7 @@ function renderStart(opts) {
   renderModels();
   applyDifficulty();
   applyCount();
+  applyAnswers();
   renderVerbosity();
   renderSliderPick();
   renderClasses();
@@ -750,20 +707,39 @@ async function capture() {
   }
   let dataUrl;
   try {
-    // The side panel sits inside the browser window, so its own window is the one to photograph.
-    const win = await chrome.windows.getCurrent();
+    const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
     dataUrl = await chrome.tabs.captureVisibleTab(win.id, { format: "jpeg", quality: 92 });
   } catch {
     notice("Chrome does not allow screenshots of this page. Open the problem in a normal tab and try again.");
     return;
   }
 
-  // The side panel crops in place. There is no second window to open and nothing to hand over.
-  shot = { dataUrl, sel: null };
-  $("shot").src = dataUrl;
-  $("crop-box").hidden = true;
-  if (state.view !== "crop") viewBeforeCrop = state.view;
-  show("crop");
+  if (FOCUS || window.innerWidth >= FOCUS_WIDTH) {
+    // The window is already big enough to select in, so no second window is needed.
+    shot = { dataUrl, sel: null };
+    $("shot").src = dataUrl;
+    $("crop-box").hidden = true;
+    if (state.view !== "crop") viewBeforeCrop = state.view;
+    show("crop");
+    return;
+  }
+
+  // The panel window is too narrow to select comfortably: open one that fills most of the screen.
+  await chrome.storage.session.set({ pendingShot: { dataUrl, requester: PAGE_ID } });
+  const width = Math.round(screen.availWidth * 0.94);
+  const height = Math.round(screen.availHeight * 0.94);
+  const win = await chrome.windows.create({
+    url: chrome.runtime.getURL("panel.html?crop=1"),
+    type: "popup",
+    width,
+    height,
+    left: Math.round((screen.availLeft || 0) + (screen.availWidth - width) / 2),
+    top: Math.round((screen.availTop || 0) + (screen.availHeight - height) / 2),
+    focused: true,
+  });
+  cropWindowId = win?.id ?? null;
+  if (state.view !== "waiting") viewBeforeCrop = state.view;
+  show("waiting", { quiet: true });
 }
 
 // ---------------------------------------------------------------- crop
@@ -836,10 +812,21 @@ async function send(useSelection) {
   }
   notice("");
   const image = await cropToJpeg(shot.dataUrl, useSelection ? shot.sel : null);
+  if (CROP) {
+    // Hand the selection back to the panel that asked for it, then get out of the way.
+    await chrome.storage.session.set({ cropResult: { requester: shot.requester, image, at: Date.now() } });
+    await chrome.storage.session.remove("pendingShot");
+    window.close();
+    return;
+  }
   generate(image);
 }
 
 function cancelCrop() {
+  if (CROP) {
+    window.close();
+    return;
+  }
   notice("");
   shot = null;
   state.view = viewBeforeCrop;
@@ -849,28 +836,6 @@ function cancelCrop() {
 // ---------------------------------------------------------------- generating (streamed)
 
 let generation = null; // AbortController for the set being written
-
-// A set that is still being written repaints the whole question view several times a second. While
-// the student is answering, that repaint lands under their hands: the Check answer button is rebuilt
-// between the press and the release, and the click goes nowhere. So the repaint is held from the
-// first keystroke until they have been still for a moment, and through the check itself. The text
-// carries on arriving in the background; only the painting waits.
-const TYPING_QUIET = 1200;
-let typingAt = 0;
-let resumeTimer = null;
-let resumePaint = null; // set while a set is streaming, so typing can release the held repaint
-
-function studentIsBusy() {
-  return Date.now() - typingAt < TYPING_QUIET || checking.size > 0;
-}
-
-function noteTyping() {
-  typingAt = Date.now();
-  clearTimeout(resumeTimer);
-  resumeTimer = setTimeout(() => {
-    if (!studentIsBusy()) resumePaint?.();
-  }, TYPING_QUIET + 60);
-}
 
 // Turns one partially written problem into a display object. A field is finished once the model has
 // moved on to a later field; the whole problem is finished once the next problem has started.
@@ -923,7 +888,7 @@ async function generate(image) {
   const controller = new AbortController();
   generation = controller;
   const before = structuredClone(state);
-  if (before.view === "crop") before.view = viewBeforeCrop;
+  if (["waiting", "crop"].includes(before.view)) before.view = viewBeforeCrop;
   notice("");
   shot = null;
   Object.assign(state, {
@@ -952,18 +917,15 @@ async function generate(image) {
   window.scrollTo({ top: 0 });
 
   let text = "";
-  const paint = () => {
+  const redraw = throttle(() => {
     const partial = parsePartialJson(text);
     if (!partial || generation !== controller) return;
     if (typeof partial.subject === "string") state.subject = partial.subject;
     if (typeof partial.topic === "string") state.topic = partial.topic;
     const raw = Array.isArray(partial.problems) ? partial.problems.filter((p) => p && typeof p === "object") : [];
     setProblems(raw, false);
-    // State is kept up to date either way; only the repaint waits for the student to be still.
-    if (state.view === "problem" && !studentIsBusy()) renderProblem();
-  };
-  resumePaint = paint;
-  const redraw = throttle(paint, 70);
+    if (state.view === "problem") renderProblem();
+  }, 70);
 
   try {
     const result = await streamApi(
@@ -975,7 +937,8 @@ async function generate(image) {
         difficulty: state.difficulty,
         count: prefs.count,
         verbosity: prefs.verbosity,
-        answer_format: "auto",
+        answer_format: answerFormat(),
+        answer_mix: answerMix(),
       },
       (delta) => {
         text += delta;
@@ -986,7 +949,6 @@ async function generate(image) {
     redraw.cancel();
     if (generation !== controller) return;
     generation = null;
-    resumePaint = null;
     if (!result.readable) {
       state = before;
       notice("No question found there. Select just the question and try again.");
@@ -1004,7 +966,6 @@ async function generate(image) {
     redraw.cancel();
     if (err.name === "AbortError" || generation !== controller) return;
     generation = null;
-    resumePaint = null;
     state = before;
     notice(describeError(err));
     renderCurrent();
@@ -1178,27 +1139,6 @@ async function makeDiagram() {
   }
 }
 
-// What the panel says while a question is being written. It follows the field the model is on, so
-// the wait reads as work happening rather than one line that sits there.
-const WRITING_NOTES = {
-  question: "Writing the question",
-  options: "Laying out the choices",
-  answer: "Working out the answer",
-  accepted_answers: "Noting the ways to write it",
-  approach: "Explaining the approach",
-  steps: "Writing the working, step by step",
-  check: "Checking the answer against the question",
-  common_mistake: "Naming the mistake to avoid",
-  diagram: "Drawing the figure",
-};
-
-function writingNote(i) {
-  if (!state.problems.length) return "Reading what is on screen";
-  const p = state.problems[i];
-  if (!p) return `Question ${i + 1} is next in line`;
-  return WRITING_NOTES[p._live] || (state.subject ? `Building a ${state.subject} set` : "Putting the set together");
-}
-
 function renderProblem(opts) {
   const i = state.index;
   const p = state.problems[i];
@@ -1213,7 +1153,6 @@ function renderProblem(opts) {
 
   $("typing").hidden = !writing;
   $("typing-label").textContent = !state.problems.length ? "Reading the problem" : `Writing question ${i + 1}`;
-  $("typing-note").textContent = writingNote(i);
   $("question").hidden = writing;
   if (p) setRich($("question"), p.question, p._live === "question");
   renderDiagramArea(i, p);
@@ -1296,29 +1235,13 @@ function renderProgress(current, total) {
 }
 
 // The buttons under the answer box. Re-rendered on every keystroke, so it touches nothing else.
-// Rebuilding replaces the very button the student may be pressing, which swallows the click, so the
-// row is left alone unless something it actually shows has changed.
 function renderActions() {
   const i = state.index;
   const p = state.problems[i];
   const actions = $("problem-actions");
-  const ready = Boolean(p?._done.answer);
-  const key = JSON.stringify([
-    state.setId,
-    i,
-    Boolean(p?.question),
-    ready,
-    Boolean(state.revealed[i]),
-    (state.attempts[i] || "").trim().length > 0,
-    p?.options.length || 0,
-    Boolean(p?._done.correct_option),
-    checking.has(`${state.setId}:${i}`),
-    Boolean(state.work[i]),
-  ]);
-  if (actions.dataset.key === key) return;
-  actions.dataset.key = key;
   actions.replaceChildren();
   if (!p || !p.question) return;
+  const ready = p._done.answer;
 
   if (!state.revealed[i]) {
     const typed = (state.attempts[i] || "").trim().length > 0;
@@ -1465,8 +1388,6 @@ async function checkAnswer() {
   }
   renderProblem({ quiet: state.streaming });
   if (result) flash(result.verdict === "correct" ? "flash" : "miss");
-  // The check is done, so the rest of the set can catch up on screen.
-  if (!studentIsBusy()) resumePaint?.();
 }
 
 function reveal() {
@@ -1799,7 +1720,7 @@ function historyEntry() {
 
 // Called from save(). Writes are batched, since save() runs on every keystroke in the answer box.
 function recordHistory() {
-  if (state.streaming || !state.setId || !state.problems.length) return;
+  if (CROP || state.streaming || !state.setId || !state.problems.length) return;
   pendingHistory.set(state.setId, historyEntry());
   clearTimeout(historyTimer);
   historyTimer = setTimeout(flushHistory, 400);
@@ -1888,11 +1809,7 @@ function setRow(h, nested = false) {
 }
 
 function renderRecent() {
-  const empty = history.length === 0;
-  $("recent").hidden = empty;
-  // Nothing to look back on yet, so the room under the button explains the thing instead of
-  // sitting blank.
-  $("first-run").hidden = !empty;
+  $("recent").hidden = history.length === 0;
   $("recent-sets").replaceChildren(...history.slice(0, 3).map((h) => setRow(h)));
 }
 
@@ -2208,11 +2125,30 @@ async function saveSettings() {
   }
 }
 
-// The roomier layout turns on by width, however wide the student has dragged the side panel.
-const WIDE_LAYOUT = 720;
+// ---------------------------------------------------------------- focus mode
 
+// PracticeX has its own window now, so focus mode grows that window instead of opening a second one.
+const FOCUS_WIDTH = 860; // at this width the panel switches to the roomier focus layout
+
+async function toggleFocus() {
+  if (FOCUS) {
+    window.close(); // a focus window from an older version
+    return;
+  }
+  save();
+  try {
+    const win = await chrome.windows.getCurrent();
+    const big = win.state === "fullscreen" || win.state === "maximized";
+    await chrome.windows.update(win.id, { state: big ? "normal" : "fullscreen" });
+  } catch {}
+}
+
+// The focus layout follows the window, however it got that big.
 function applyWindowSize() {
-  document.body.classList.toggle("focus", window.innerWidth >= WIDE_LAYOUT);
+  if (CROP) return;
+  const big = FOCUS || window.innerWidth >= FOCUS_WIDTH;
+  document.body.classList.toggle("focus", big);
+  $("toggle-focus").title = big ? "Leave focus mode" : "Focus mode";
 }
 
 // ---------------------------------------------------------------- boot
@@ -2244,9 +2180,17 @@ function bind() {
   });
   // A settle at the end of the drag, not a bulge on every pixel of it.
   $("difficulty").addEventListener("change", () => applyDifficulty({ animate: true }));
-  for (const [name, id] of Object.entries(SLIDER_PICK)) {
-    $(id).addEventListener("click", () => pickSlider(name));
-  }
+  $("answer-mix").addEventListener("input", (e) => {
+    prefs.answerMix = Number(e.target.value);
+    applyAnswers();
+    savePrefs();
+  });
+  $("answer-mix").addEventListener("change", () => applyAnswers({ animate: true }));
+  $("slider-pick").addEventListener("change", (e) => {
+    prefs.slider = e.target.value;
+    savePrefs();
+    renderSliderPick();
+  });
   $("count").addEventListener("input", (e) => {
     prefs.count = Number(e.target.value);
     applyCount({ animate: true });
@@ -2272,20 +2216,28 @@ function bind() {
     fitInlineMath(document.body);
     savePrefs();
   });
-  document.addEventListener("keydown", (e) => {
-    if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
-    if (state.view !== "crop") return;
-    if (e.key === "Escape") cancelCrop();
-    if (e.key === "Enter") send(Boolean(shot?.sel));
-  });
+  $("toggle-focus").addEventListener("click", toggleFocus);
+  if (FOCUS || CROP) {
+    document.addEventListener("keydown", (e) => {
+      if (["INPUT", "SELECT"].includes(document.activeElement?.tagName)) return;
+      if (e.key === "Escape") window.close();
+      if (CROP && e.key === "Enter") send(Boolean(shot?.sel));
+    });
+  }
 
   setupCrop();
   $("send-crop").addEventListener("click", () => send(true));
   $("send-whole").addEventListener("click", () => send(false));
   $("cancel-crop").addEventListener("click", cancelCrop);
+  $("cancel-waiting").addEventListener("click", () => {
+    if (cropWindowId != null) chrome.windows.remove(cropWindowId).catch(() => {});
+    cropWindowId = null;
+    state.view = viewBeforeCrop;
+    renderCurrent();
+  });
+
   $("attempt").addEventListener("input", (e) => {
     state.attempts[state.index] = e.target.value;
-    noteTyping();
     renderActions();
     renderCheckResult(state.index);
     if (!state.streaming) save();
@@ -2330,6 +2282,18 @@ function bind() {
   $("save-settings").addEventListener("click", saveSettings);
 }
 
+async function initCropWindow() {
+  document.body.classList.add("crop-mode");
+  const { pendingShot } = await chrome.storage.session.get("pendingShot");
+  if (!pendingShot) {
+    window.close();
+    return;
+  }
+  shot = { dataUrl: pendingShot.dataUrl, sel: null, requester: pendingShot.requester };
+  $("shot").src = shot.dataUrl;
+  show("crop", { quiet: true });
+}
+
 async function init() {
   bind();
   applyWindowSize();
@@ -2340,13 +2304,15 @@ async function init() {
   applyTextScale();
   applyDifficulty();
   applyCount();
+  applyAnswers();
   renderVerbosity();
+  if (CROP) {
+    await initCropWindow();
+    return;
+  }
   watchStorage();
   await loadConfig();
   renderCurrent();
-  // The opening card fades itself out; drop it from the page once it has, so nothing is left
-  // sitting over the panel.
-  setTimeout(() => $("splash")?.remove(), 1600);
 }
 
 init();

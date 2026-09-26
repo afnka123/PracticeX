@@ -13,19 +13,17 @@
   <script src="vendor/mathjax/tex-svg-full.js" defer></script>
 </head>
 <body>
-  <div class="splash" id="splash">
-    <img class="splash-mark" src="logo/icon.svg" width="76" height="76" alt="">
-    <span class="splash-word">Practice<span class="x">X</span></span>
-    <span class="splash-tag">Screenshot a question. Get more like it.</span>
-  </div>
   <main class="panel">
     <header class="head">
       <img class="mark" src="logo/icon.svg" width="28" height="28" alt="">
       <span class="wordmark">Practice<span class="x">X</span></span>
-      <p class="usage" id="usage" hidden><span id="usage-main"></span><span class="usage-tail" id="usage-tail"></span></p>
       <div class="head-tools">
         <button class="icon-btn" id="open-history" title="Your progress" aria-label="Your progress">
           <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 16.5V11M8 16.5V7M12 16.5v-6M16 16.5V3.5"/></svg>
+        </button>
+        <button class="icon-btn" id="toggle-focus" title="Focus mode" aria-label="Focus mode">
+          <svg class="enter" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" d="M3 7.5V3h4.5M12.5 3H17v4.5M17 12.5V17h-4.5M7.5 17H3v-4.5"/></svg>
+          <svg class="exit" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" d="M7.5 3v4.5H3M17 7.5h-4.5V3M12.5 17v-4.5H17M3 12.5h4.5V17"/></svg>
         </button>
         <button class="icon-btn" id="open-settings" title="Settings" aria-label="Settings">
           <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M11.3 1.5l.4 2.1c.5.2 1 .5 1.4.8l2-.7 1.3 2.2-1.6 1.4c.1.5.1 1.1 0 1.6l1.6 1.4-1.3 2.2-2-.7c-.4.3-.9.6-1.4.8l-.4 2.1H8.7l-.4-2.1c-.5-.2-1-.5-1.4-.8l-2 .7-1.3-2.2 1.6-1.4a4.6 4.6 0 010-1.6L3.6 5.9l1.3-2.2 2 .7c.4-.3.9-.6 1.4-.8l.4-2.1h2.6zM10 7a3 3 0 100 6 3 3 0 000-6z" transform="translate(0 1.5)"/></svg>
@@ -33,10 +31,13 @@
       </div>
     </header>
 
+    <p class="usage" id="usage" hidden><span id="usage-main"></span></p>
+
     <p class="notice" id="notice" hidden></p>
 
     <!-- Start -->
     <section class="view" id="view-start" hidden>
+      <p class="lede">Screenshot a question, get new practice problems like it.</p>
       <div class="controls">
         <div class="field" id="class-field">
           <div class="row-label">
@@ -55,15 +56,17 @@
           <p class="hint" id="class-hint"></p>
         </div>
         <div class="field slider-field" id="slider-field">
-          <div class="pickers" role="tablist" aria-label="What the slider sets">
-            <button type="button" class="picker" id="pick-count" data-slider="count" role="tab" aria-selected="true" aria-controls="count-body">
-              <span class="picker-key">Problems</span>
-              <span class="picker-val count-readout mono" id="count-readout">3</span>
-            </button>
-            <button type="button" class="picker" id="pick-difficulty" data-slider="difficulty" role="tab" aria-selected="false" aria-controls="diff-body">
-              <span class="picker-key">Difficulty</span>
-              <span class="picker-val diff-readout" id="diff-readout">Same</span>
-            </button>
+          <div class="row-label">
+            <select class="slider-pick" id="slider-pick" aria-label="What the slider sets">
+              <option value="count">Problems</option>
+              <option value="difficulty">Difficulty</option>
+              <option value="answers">Answer type</option>
+            </select>
+            <span class="readout-stack">
+              <span class="count-readout mono" id="count-readout">3</span>
+              <span class="diff-readout" id="diff-readout">Medium</span>
+              <span class="ans-readout" id="ans-readout">Written</span>
+            </span>
           </div>
           <div class="slider-stack">
             <div class="slider-body" id="count-body">
@@ -81,25 +84,32 @@
                 <input type="range" id="difficulty" min="0" max="100" step="1" aria-label="Difficulty">
               </div>
               <div class="diff-ticks" id="diff-ticks" aria-hidden="true">
-                <span>Easy</span><span>Same</span><span>Hard</span>
+                <span>Easy</span><span>Medium</span><span>Hard</span>
               </div>
             </div>
+            <div class="slider-body" id="ans-body">
+              <div class="ans" id="ans-wrap">
+                <div class="ans-rail" aria-hidden="true"><div class="ans-fill"></div><div class="ans-notch"></div></div>
+                <input type="range" id="answer-mix" min="0" max="100" step="1" aria-label="Answer style">
+              </div>
+              <div class="ans-ticks" id="ans-ticks" aria-hidden="true">
+                <span>Choices</span><span>Either</span><span>Written</span>
+              </div>
+              <p class="slider-hint">Set the answer format by preference.
+                <span class="slider-note">*Select Either if you have no preference between multiple-choice and free-response questions.</span>
+              </p>
+            </div>
           </div>
-          <p class="slider-tip">* Tap <b>Problems</b> or <b>Difficulty</b> above to choose which one the slider sets.</p>
           <div class="current-settings" id="current-settings">
+            <div class="cs-cell"><span class="cs-key">Difficulty</span><span class="cs-val" id="cs-difficulty">Medium</span></div>
+            <div class="cs-cell"><span class="cs-key">Problem #</span><span class="cs-val mono" id="cs-count">3</span></div>
+            <div class="cs-cell"><span class="cs-key">Answer type</span><span class="cs-val" id="cs-answers">Written</span></div>
             <div class="cs-cell"><span class="cs-key">Explanation</span><span class="cs-val" id="cs-verbosity">Standard</span></div>
-            <button class="btn primary" id="generate">Screenshot</button>
           </div>
         </div>
       </div>
-      <div class="first-run" id="first-run" hidden>
-        <span class="label">How it works</span>
-        <ol class="steps-list">
-          <li><span class="sn">1</span><span>Open a page with a problem on it, then press <b>Screenshot</b>.</span></li>
-          <li><span class="sn">2</span><span>Drag a box around the question. Only that box is sent.</span></li>
-          <li><span class="sn">3</span><span>Practise the set it writes: answers and working are there when you want them.</span></li>
-        </ol>
-        <p class="hint">Your practice stays on this computer. Screenshots are never stored.</p>
+      <div class="actions">
+        <button class="btn primary" id="generate">Screenshot</button>
       </div>
       <div class="recent" id="recent" hidden>
         <div class="row-label">
@@ -121,10 +131,19 @@
         <p class="hint">Only the box you drag is sent.</p>
         <div class="actions">
           <button class="btn primary" id="send-crop">Generate</button>
-          <button class="btn secondary" id="send-whole">Whole page</button>
-          <button class="btn ghost-btn" id="cancel-crop">Cancel</button>
+          <button class="btn secondary" id="send-whole">Use whole page</button>
         </div>
+        <button class="link" id="cancel-crop">Cancel</button>
       </div>
+    </section>
+
+    <!-- Waiting for the crop window -->
+    <section class="view" id="view-waiting" hidden>
+      <div class="card">
+        <span class="label">Select the problem</span>
+        <p class="body">Drag over the problem in the window that just opened, then press Generate.</p>
+      </div>
+      <button class="link" id="cancel-waiting">Cancel</button>
     </section>
 
     <!-- Problem -->
@@ -137,19 +156,7 @@
         <div class="progress" id="q-progress" role="group" aria-label="Questions in this set"></div>
       </div>
       <div class="card question-card">
-        <div class="typing" id="typing" hidden>
-          <div class="typing-head">
-            <span class="typing-mark" aria-hidden="true">
-              <svg viewBox="0 0 20 20" width="17" height="17"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M3 15.4 5.1 15l8.4-8.4a1.5 1.5 0 0 0 0-2.1l-.9-.9a1.5 1.5 0 0 0-2.1 0L2.1 12l-.4 2.1z"/></svg>
-            </span>
-            <span class="label" id="typing-label">Reading the problem</span>
-            <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          </div>
-          <p class="typing-note" id="typing-note">Reading what is on screen</p>
-          <div class="skeleton" aria-hidden="true">
-            <span class="sk-line"></span><span class="sk-line"></span><span class="sk-line short"></span>
-          </div>
-        </div>
+        <div class="typing" id="typing" hidden><span class="label" id="typing-label">Reading the problem</span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
         <div class="content question" id="question"></div>
         <button class="diagram-btn" id="diagram-toggle" data-figure="drawing" hidden>
           <svg class="ico-drawing" viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 17V3M3 17h14M5.5 13.5l4-5 3 2.5 4-6"/></svg>
@@ -226,10 +233,7 @@
       </div>
 
       <div class="report-row">
-        <button class="btn secondary restart-btn" id="start-over">
-          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6M16.5 3v3.2h-3.2"/></svg>
-          Start over
-        </button>
+        <button class="link mono" id="start-over">Start over</button>
         <button class="link mono" id="open-report">Report a problem</button>
       </div>
       <div class="report" id="report" hidden>

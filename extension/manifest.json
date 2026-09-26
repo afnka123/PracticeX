@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PracticeX",
-  "version": "0.7.2",
+  "version": "0.6.1",
   "description": "Reads the question on your screen (math, science, writing or languages) and writes new practice problems of the same type.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -17,15 +17,11 @@
       "32": "icons/icon32.png"
     }
   },
-  "side_panel": {
-    "default_path": "panel.html"
-  },
   "background": {
     "service_worker": "background.js"
   },
   "permissions": [
-    "storage",
-    "sidePanel"
+    "storage"
   ],
   "optional_host_permissions": [
     "<all_urls>"
