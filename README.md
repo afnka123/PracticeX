@@ -87,8 +87,7 @@ leaked key.
   screen, so the middle band is called Same rather than Medium: it is the level of the question you
   screenshot, which is what the slider's tooltip says. The old
   `easier` / `same` / `harder` strings still work and land on 25 / 50 / 75, so sets saved before the slider
-  reopen at the right spot. **More like these** moves the slider 25 either way instead of jumping to a fixed
-  step.
+  reopen at the right spot.
 - **1 to 5 problems per set.** Chosen with the Problems slider. Problems and Difficulty sit side by
   side as a pair of buttons, each showing what it is currently set to; tapping one hands it the single
   slider underneath. Both slider bodies share one grid cell, so switching never moves anything below
@@ -116,7 +115,6 @@ leaked key.
 - **Explanation** (Settings): Brief, Standard or Detailed. It is sent with each request and controls how many
   steps there are and how much each one explains. In a real test with GPT-5.6 Luna, Brief gave 3 short steps
   and Detailed gave 6 steps averaging about 260 characters each.
-  **More like these** reuses the last screenshot, so no new capture is needed.
 - **Math rendering.** The model writes LaTeX. MathJax 3.2.2 (`extension/vendor/mathjax`, Apache 2.0) renders it
   as SVG. It is bundled because extensions cannot load remote scripts. TeX's `\href`, `\require` and
   autoloading are switched off because model output is untrusted.
@@ -197,9 +195,9 @@ Scrollbars are styled to match: a thin peach-to-coral thumb on a transparent tra
 under math that is too wide for its line.
 
 The problem view has a progress bar you can click to jump between questions. It shows the current question,
-viewed answers and correct answers. Under the answer comes the "Struggling?" card, then **More like these**
-with Easier / Same level / Harder, so the student can change difficulty right when they want more (hidden
-for sets reopened from history, which have no screenshot). Then Start over and Report. A bottom bar
+viewed answers and correct answers. Under the answer comes the "Struggling?" card, then Start over and Report.
+For another set, the student takes a new screenshot; the cropped screenshot is not kept once it has been
+sent. A bottom bar
 (Previous · New screenshot · Next) stays pinned to the foot of the panel. New screenshot captures straight
 away. Previous and Next keep their slots when they do not apply, so the bar never shifts.
 
@@ -208,7 +206,7 @@ away. Previous and Next keep their slots when they do not apply, so the bar neve
 - The API keys live only on the server. The extension has none.
 - The panel states the allowance in words under the header: "120 questions left this hour", switching to
   the reset time in the last 5% of the cap, and "No questions left until 4:15" at zero. At zero,
-  Generate, New screenshot and More like these are disabled, so a student never spends a click on a
+  Generate and New screenshot are disabled, so a student never spends a click on a
   request the server would refuse.
 - All limits are sliding one-hour windows, enforced on the server:
   - `HOURLY_CAP`: per install, default 200.

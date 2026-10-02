@@ -50,7 +50,6 @@ let state = {
   madeDiagrams: [], // diagrams drawn on request with "Make me a diagram"
   stepsOpen: [], // per problem: which steps are expanded
   setId: "",
-  image: null, // last cropped screenshot, for "More like these"
   prereq: null, // { topic, data, streaming, live }
 };
 let prefs = { textScale: 1, count: 3, verbosity: "standard", courseId: "", slider: "count" };
@@ -90,6 +89,7 @@ async function loadStorage() {
   if (!SLIDERS.includes(prefs.slider)) prefs.slider = "count";
   const session = await chrome.storage.session.get("state");
   if (session.state) state = { ...state, ...session.state.data };
+  delete state.image; // older builds kept the last screenshot here for "More like these"
   state.problems = state.problems.map((p) => ({ ...p, steps: toSteps(p.steps) })); // sessions saved before step titles
   if (state.streaming) {
     // The panel closed mid-stream: keep only the problems that finished.
@@ -272,7 +272,7 @@ function renderUsage() {
   }
   box.title = `${left} of ${usage.limit} questions this hour.${resets ? ` The count resets at ${resets}.` : ""}`;
   // Everything that would spend a question says so rather than failing on the server.
-  const spenders = [$("generate"), $("new-set"), ...$("more-options").querySelectorAll("button")];
+  const spenders = [$("generate"), $("new-set")];
   for (const b of spenders) b.disabled = out;
   $("generate").textContent = out ? "Limit reached" : "Screenshot";
 }
@@ -956,7 +956,6 @@ async function generate(image) {
     madeDiagrams: [],
     stepsOpen: [],
     setId: crypto.randomUUID(),
-    image,
     prereq: null,
   });
   setProblems([], false);
@@ -1021,20 +1020,6 @@ async function generate(image) {
     notice(describeError(err));
     renderCurrent();
   }
-}
-
-const MORE_NUDGE = { easier: -25, same: 0, harder: 25 };
-
-function moreLikeThese(which) {
-  notice("");
-  if (which in MORE_NUDGE) {
-    state.difficulty = Math.max(0, Math.min(100, difficultyLevel() + MORE_NUDGE[which]));
-  }
-  if (!state.image) {
-    startOver();
-    return;
-  }
-  generate(state.image);
 }
 
 // ---------------------------------------------------------------- problem
@@ -1271,12 +1256,6 @@ function renderProblem(opts) {
   $("next").disabled = isLast;
   $("next").classList.toggle("emph", revealed && !isLast);
 
-  // Needs the screenshot, which is not kept with sets reopened from history.
-  $("more-card").hidden = !state.image || state.streaming;
-  for (const b of $("more-options").children) {
-    const main = isLast && revealed && b.dataset.value === "same"; // the one coral button at the end of a set
-    b.className = `btn ${main ? "primary" : "secondary"}`;
-  }
   renderProgress(i, total);
   show("problem", { quiet: opts?.quiet || state.streaming });
 }
@@ -2129,7 +2108,6 @@ function openHistorySet(id) {
     madeDiagrams: [...h.made],
     stepsOpen: [],
     setId: h.id,
-    image: null, // screenshots are never kept, so "More like these" needs a new one
     prereq: null,
   });
   setProblems(h.problems, true);
@@ -2321,10 +2299,6 @@ function bind() {
   $("next").addEventListener("click", () => go(state.index + 1));
   $("new-set").addEventListener("click", capture);
   $("start-over").addEventListener("click", startOver);
-  $("more-options").addEventListener("click", (e) => {
-    const value = e.target.closest("button")?.dataset.value;
-    if (value) moreLikeThese(value);
-  });
   $("classes").addEventListener("keydown", (e) => {
     if (e.key === "Escape") openAddClass(false);
   });
