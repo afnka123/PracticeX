@@ -329,14 +329,75 @@ function hideOpenMath(text) {
   return text.slice(0, cut);
 }
 
+// Anything still holding a delimiter or a chemistry macro has not been rendered yet.
+const RAW_MATH = /\\[([]|\\(?:ce|pu)\{/;
+// What tells real math from a price like "$40 for $5 each": a command, a script, or a grouping.
+const MATH_LIKE = /\\[a-zA-Z]|[\^_{}]/;
+
+// The prompt asks for \( ... \) and \[ ... \], but a model drops into $ ... $ or writes a formula
+// bare often enough to matter, and those delimiters are not configured: the source would sit on
+// screen as typed. Normalising here costs nothing and covers the cases we keep seeing.
+function normalizeMath(text) {
+  if (!/[$]|\\(?:ce|pu)\{/.test(text)) return text;
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (m, body) => `\\[${body}\\]`);
+  // Single dollars only when the body carries a command, so currency is left alone.
+  text = text.replace(/\$([^$\n]+?)\$/g, (m, body) => (MATH_LIKE.test(body) ? `\\(${body}\\)` : m));
+  return wrapBareChem(text);
+}
+
+// \ce{...} or \pu{...} written outside any delimiter, wrapped so MathJax sees it. Braces are matched
+// by counting rather than by regex, since a chemical formula nests them.
+function wrapBareChem(text) {
+  if (!/\\(?:ce|pu)\{/.test(text)) return text;
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const starts = [text.indexOf("\\(", i), text.indexOf("\\[", i)].filter((n) => n >= 0);
+    const next = starts.length ? Math.min(...starts) : -1;
+    out += wrapChemOutsideMath(text.slice(i, next < 0 ? text.length : next));
+    if (next < 0) break;
+    // Step over the math region untouched; an unclosed one runs to the end.
+    const close = text.indexOf(text[next + 1] === "(" ? "\\)" : "\\]", next + 2);
+    const end = close < 0 ? text.length : close + 2;
+    out += text.slice(next, end);
+    i = end;
+  }
+  return out;
+}
+
+function wrapChemOutsideMath(chunk) {
+  const re = /\\(?:ce|pu)\{/g;
+  let out = "";
+  let i = 0;
+  let m;
+  while ((m = re.exec(chunk))) {
+    let depth = 0;
+    let j = m.index + m[0].length - 1; // sits on the opening brace
+    for (; j < chunk.length; j++) {
+      if (chunk[j] === "{") depth++;
+      else if (chunk[j] === "}" && --depth === 0) break;
+    }
+    if (j >= chunk.length) break; // half-written while streaming: leave it for the next pass
+    out += chunk.slice(i, m.index) + `\\(${chunk.slice(m.index, j + 1)}\\)`;
+    i = j + 1;
+    re.lastIndex = i;
+  }
+  return out + chunk.slice(i);
+}
+
 // Model text is set with textContent (never innerHTML); MathJax then renders the \( \) and \[ \] parts.
 // Unchanged text is skipped, so re-rendering while streaming only touches the part that grew.
+// data-src is what should be on screen; data-typeset is what MathJax has actually rendered. They are
+// separate so that a pass which never ran — the bundle was still loading, or MathJax threw — is
+// retried instead of leaving the source on screen for the life of the panel.
 function setRich(node, text, live = false) {
-  text = String(text || "");
+  text = normalizeMath(String(text || ""));
   if (live) text = hideOpenMath(text);
   node.classList.toggle("live", live);
   if (node.dataset.src === text) return;
   node.dataset.src = text;
+  delete node.dataset.typeset;
+  delete node.dataset.mathTries;
   if (window.MathJax?.typesetClear) MathJax.typesetClear([node]);
   node.replaceChildren(
     ...text
@@ -362,9 +423,11 @@ function whenMathReady() {
     mathReady = new Promise((resolve) => {
       const look = () => {
         if (window.MathJax?.startup?.promise) return resolve(window.MathJax.startup.promise);
-        // Give up eventually rather than hold the queue: the LaTeX source still reads as text.
+        // Give up on this wait rather than hold the queue, but clear the cache so the next pass
+        // starts a fresh one: a bundle that lands late still gets its chance.
         if (Date.now() > deadline) {
-          console.warn("MathJax never loaded; showing LaTeX source");
+          console.warn("MathJax still not loaded; will retry");
+          mathReady = null;
           return resolve();
         }
         setTimeout(look, 50);
@@ -375,13 +438,58 @@ function whenMathReady() {
   return mathReady;
 }
 
+// One pass per node at a time. A pass reads data-src when it runs, so updates that arrive while it
+// is queued are picked up by that same pass instead of stacking another full typeset behind it.
 let typesetQueue = Promise.resolve();
+const queuedNodes = new Set();
+
 function typeset(node) {
+  scheduleMathHeal();
+  if (queuedNodes.has(node)) return;
+  queuedNodes.add(node);
   typesetQueue = typesetQueue
     .then(whenMathReady)
-    .then(() => window.MathJax?.typesetPromise?.([node]))
-    .then(() => fitInlineMath(node))
-    .catch((err) => console.warn("MathJax:", err));
+    .then(() => {
+      queuedNodes.delete(node);
+      const want = node.dataset.src || "";
+      if (!node.isConnected || node.dataset.typeset === want) return;
+      // Leave data-typeset unset when the bundle is not up yet, so the sweep comes back to it.
+      if (!window.MathJax?.typesetPromise) return;
+      return MathJax.typesetPromise([node]).then(() => {
+        node.dataset.typeset = want;
+        fitInlineMath(node);
+      });
+    })
+    .catch((err) => {
+      queuedNodes.delete(node);
+      console.warn("MathJax:", err);
+    });
+}
+
+// Whatever the reason a pass did not land, the student must never be left reading LaTeX source.
+// This sweep finds nodes that still hold delimiters and tries them again, then stops once clean.
+let healTimer = null;
+function scheduleMathHeal() {
+  if (healTimer) return;
+  healTimer = setInterval(() => {
+    const stuck = [...document.querySelectorAll("[data-src]:not([data-typeset])")].filter((n) => n.isConnected);
+    if (!stuck.length) {
+      clearInterval(healTimer);
+      healTimer = null;
+      return;
+    }
+    for (const node of stuck) {
+      const src = node.dataset.src || "";
+      const tries = Number(node.dataset.mathTries || 0);
+      // Plain prose needs no pass, and a node that has failed repeatedly will not start working.
+      if (!RAW_MATH.test(src) || tries >= 4) {
+        node.dataset.typeset = src;
+        continue;
+      }
+      node.dataset.mathTries = String(tries + 1);
+      typeset(node);
+    }
+  }, 1200);
 }
 
 function fitInlineMath(root) {
@@ -837,6 +945,28 @@ function cancelCrop() {
 
 let generation = null; // AbortController for the set being written
 
+// A set that is still being written repaints the whole question view several times a second. While
+// the student is answering, that repaint lands under their hands: the Check answer button is rebuilt
+// between the press and the release, and the click goes nowhere. So the repaint is held from the
+// first keystroke until they have been still for a moment, and through the check itself. The text
+// carries on arriving in the background; only the painting waits.
+const TYPING_QUIET = 1200;
+let typingAt = 0;
+let resumeTimer = null;
+let resumePaint = null; // set while a set is streaming, so typing can release the held repaint
+
+function studentIsBusy() {
+  return Date.now() - typingAt < TYPING_QUIET || checking.size > 0;
+}
+
+function noteTyping() {
+  typingAt = Date.now();
+  clearTimeout(resumeTimer);
+  resumeTimer = setTimeout(() => {
+    if (!studentIsBusy()) resumePaint?.();
+  }, TYPING_QUIET + 60);
+}
+
 // Turns one partially written problem into a display object. A field is finished once the model has
 // moved on to a later field; the whole problem is finished once the next problem has started.
 function toProblem(raw, complete) {
@@ -917,15 +1047,18 @@ async function generate(image) {
   window.scrollTo({ top: 0 });
 
   let text = "";
-  const redraw = throttle(() => {
+  const paint = () => {
     const partial = parsePartialJson(text);
     if (!partial || generation !== controller) return;
     if (typeof partial.subject === "string") state.subject = partial.subject;
     if (typeof partial.topic === "string") state.topic = partial.topic;
     const raw = Array.isArray(partial.problems) ? partial.problems.filter((p) => p && typeof p === "object") : [];
     setProblems(raw, false);
-    if (state.view === "problem") renderProblem();
-  }, 70);
+    // State is kept up to date either way; only the repaint waits for the student to be still.
+    if (state.view === "problem" && !studentIsBusy()) renderProblem();
+  };
+  resumePaint = paint;
+  const redraw = throttle(paint, 70);
 
   try {
     const result = await streamApi(
@@ -949,6 +1082,7 @@ async function generate(image) {
     redraw.cancel();
     if (generation !== controller) return;
     generation = null;
+    resumePaint = null;
     if (!result.readable) {
       state = before;
       notice("No question found there. Select just the question and try again.");
@@ -966,6 +1100,7 @@ async function generate(image) {
     redraw.cancel();
     if (err.name === "AbortError" || generation !== controller) return;
     generation = null;
+    resumePaint = null;
     state = before;
     notice(describeError(err));
     renderCurrent();
@@ -1235,13 +1370,29 @@ function renderProgress(current, total) {
 }
 
 // The buttons under the answer box. Re-rendered on every keystroke, so it touches nothing else.
+// Rebuilding replaces the very button the student may be pressing, which swallows the click, so the
+// row is left alone unless something it actually shows has changed.
 function renderActions() {
   const i = state.index;
   const p = state.problems[i];
   const actions = $("problem-actions");
+  const ready = Boolean(p?._done.answer);
+  const key = JSON.stringify([
+    state.setId,
+    i,
+    Boolean(p?.question),
+    ready,
+    Boolean(state.revealed[i]),
+    (state.attempts[i] || "").trim().length > 0,
+    p?.options.length || 0,
+    Boolean(p?._done.correct_option),
+    checking.has(`${state.setId}:${i}`),
+    Boolean(state.work[i]),
+  ]);
+  if (actions.dataset.key === key) return;
+  actions.dataset.key = key;
   actions.replaceChildren();
   if (!p || !p.question) return;
-  const ready = p._done.answer;
 
   if (!state.revealed[i]) {
     const typed = (state.attempts[i] || "").trim().length > 0;
@@ -1388,6 +1539,8 @@ async function checkAnswer() {
   }
   renderProblem({ quiet: state.streaming });
   if (result) flash(result.verdict === "correct" ? "flash" : "miss");
+  // The check is done, so the rest of the set can catch up on screen.
+  if (!studentIsBusy()) resumePaint?.();
 }
 
 function reveal() {
@@ -2238,6 +2391,7 @@ function bind() {
 
   $("attempt").addEventListener("input", (e) => {
     state.attempts[state.index] = e.target.value;
+    noteTyping();
     renderActions();
     renderCheckResult(state.index);
     if (!state.streaming) save();
