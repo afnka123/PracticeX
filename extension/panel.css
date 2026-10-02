@@ -1341,3 +1341,125 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
   .picker .diff-readout { font-size: 12.5px; }
   .current-settings #generate { padding: 10px 16px; }
 }
+
+/* ------------------------------------------------------------------ Warmth on the start screen */
+/* The start screen read as nearly all slate, with coral only on the Screenshot button. These put the
+   brand's coral and peach where the eye already goes (the section labels, the chosen setting, the
+   slider, the recent sets) without new elements, new layout or anything that moves. */
+body {
+  background:
+    radial-gradient(110% 50% at 0% 0%, rgba(255, 122, 77, 0.2), transparent 62%),
+    radial-gradient(70% 38% at 100% 18%, rgba(255, 217, 194, 0.07), transparent 70%),
+    radial-gradient(90% 45% at 100% 100%, rgba(90, 110, 134, 0.28), transparent 65%),
+    var(--practicex-slate);
+  background-attachment: fixed;
+}
+
+/* Section labels pick up a warm tint instead of the grey they shared with the body copy. */
+#view-start .label,
+#view-start .cs-key { color: #f2b393; }
+
+/* The setting the slider is driving glows, rather than only having a coral edge. */
+.picker.on {
+  background: linear-gradient(135deg, rgba(255, 122, 77, 0.24), rgba(255, 184, 150, 0.08));
+  box-shadow: 0 6px 18px -10px rgba(255, 122, 77, 0.9), inset 0 0 0 1px rgba(255, 184, 150, 0.12);
+}
+.picker.on .count-readout { color: #ffd2bb; }
+
+/* The problem-count wedge fills in coral to peach, and the handle and the chosen number follow it. */
+.wedge-fill { background: linear-gradient(90deg, #ffd9c2 0%, #ffb896 45%, #ff9c70 75%, #ff7a4d 100%); }
+.count input::-webkit-slider-thumb {
+  background: #fff3ec;
+  box-shadow: 0 0 0 calc(var(--t) * 7px) rgba(255, 122, 77, calc(0.12 + var(--t) * 0.16)), 0 2px 8px rgba(255, 122, 77, 0.35);
+}
+.count-ticks span.current { color: var(--practicex-coral); }
+
+/* "+ Add a class" reads as something to tap. */
+.chips.classes button.add { border-color: rgba(255, 184, 150, 0.45); color: #f2b393; }
+.chips.classes button.add:hover { border-color: var(--practicex-coral); color: var(--practicex-peach); }
+
+/* The rule above Explanation fades in from coral rather than being a flat grey line. */
+.current-settings {
+  border-top: 0;
+  background: linear-gradient(90deg, rgba(255, 122, 77, 0.55), rgba(255, 217, 194, 0.18) 45%, rgba(60, 76, 96, 0.6)) top / 100% 1px no-repeat;
+}
+
+/* Recent sets carry a coral edge, and the unstarted ones say so in peach. */
+.set-row {
+  border-left: 3px solid rgba(255, 122, 77, 0.7);
+  background: linear-gradient(90deg, rgba(255, 122, 77, 0.07), rgba(255, 255, 255, 0.02) 40%);
+}
+.set-row:hover { border-left-color: var(--practicex-coral); }
+.set-score { color: #f2b393; }
+
+/* The first-run card gets the same warm edge as the question card. */
+.first-run {
+  border: 1px solid transparent;
+  background: var(--grad-card) padding-box, var(--grad-edge) border-box;
+}
+
+/* ------------------------------------------------------------------ Start screen type: Editorial Serif */
+/* A serif question with one italic accent over a clean sans, so the start screen reads warm without
+   reading young. Both faces load with the others in panel.html and work on every OS; the fallbacks
+   are what Windows, ChromeOS and Linux already have, so an offline panel still looks intended. */
+:root {
+  --practicex-font-ui: "Figtree", "Avenir Next", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --practicex-font-display: "Literata", "Iowan Old Style", Charter, Georgia, serif;
+}
+#view-start { font-family: var(--practicex-font-ui); gap: 12px; }
+
+.hello { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.eyebrow {
+  font-family: var(--practicex-font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #f2b393;
+}
+.hello-title {
+  margin: 0;
+  font-family: var(--practicex-font-display);
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1.16;
+  letter-spacing: -0.01em;
+  color: var(--practicex-bone);
+}
+.hello-title i { font-style: italic; color: var(--practicex-coral); }
+
+/* Labels: the same sans as the rest, small caps instead of the code-style mono. */
+#view-start .label,
+#view-start .cs-key,
+#view-start .link.mono { font-family: var(--practicex-font-ui); font-weight: 600; letter-spacing: 0.12em; }
+#view-start .hint, .slider-tip, #view-start .chips button { font-family: var(--practicex-font-ui); }
+
+/* The two settings read as a word and its value, not as a code label. */
+#view-start .picker { border-radius: 8px; padding: 8px 11px; background: rgba(255, 255, 255, 0.02); box-shadow: none; }
+#view-start .picker-key {
+  font-family: var(--practicex-font-ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--practicex-mist);
+}
+#view-start .picker .count-readout,
+#view-start .picker .diff-readout { font-family: var(--practicex-font-ui); font-size: 14.5px; font-weight: 600; }
+#view-start .picker .count-readout { color: var(--practicex-bone); }
+/* The chosen one is marked by a coral edge and underline rather than a fill. */
+#view-start .picker.on {
+  background: rgba(255, 122, 77, 0.06);
+  border-color: rgba(255, 122, 77, 0.8);
+  box-shadow: inset 0 -2px 0 var(--practicex-coral);
+}
+#view-start .picker.on .picker-key { color: #f2b393; }
+
+#view-start .cs-val { font-family: var(--practicex-font-ui); font-size: 14px; font-weight: 600; }
+#view-start .btn { font-family: var(--practicex-font-ui); font-weight: 600; }
+#view-start #generate { border-radius: 8px; }
+
+#view-start .set-topic { font-family: var(--practicex-font-ui); font-weight: 600; font-size: 14px; }
+#view-start .set-meta, #view-start .set-score { font-family: var(--practicex-font-ui); }
+#view-start .set-row { border-left-width: 2px; }
+#view-start .steps-list li { font-family: var(--practicex-font-ui); font-size: 13px; }

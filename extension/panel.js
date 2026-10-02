@@ -726,6 +726,13 @@ function renderModels() {
   select.disabled = models.length === 0;
 }
 
+// The line over the greeting: the day, and the class when one is picked ("Thursday · Algebra 1").
+function renderGreeting() {
+  const day = new Date().toLocaleDateString("en-US", { weekday: "long" });
+  const course = courseById(prefs.courseId);
+  $("hello-eyebrow").textContent = course ? `${day} · ${course.name}` : day;
+}
+
 function renderStart(opts) {
   renderModels();
   applyDifficulty();
@@ -1649,6 +1656,7 @@ function subjectName(subject) {
 }
 
 function renderClasses() {
+  renderGreeting(); // the line over the greeting names the picked class
   const wrap = $("classes");
   const chips = [];
   if (courses.length) {
