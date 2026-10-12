@@ -52,7 +52,7 @@ body.focus .icon-btn .enter { display: none; }
   line-height: 1;
 }
 .wordmark .x { color: var(--practicex-coral); }
-.head-tools { display: flex; gap: 2px; flex: 0 0 auto; }
+.head-tools { display: flex; gap: 2px; flex: 0 0 auto; margin-left: auto; }
 .icon-btn {
   color: var(--practicex-mist);
   display: grid;
@@ -646,7 +646,6 @@ body {
 .restart-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; font-size: 13px; }
 .restart-btn svg { flex: 0 0 auto; }
 
-
 /* Bottom bar: always at the foot of the panel, so there is no dead space under a short answer */
 #view-problem { flex: 1; }
 .nav-bar {
@@ -788,22 +787,6 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
   .option.flash::after { display: none; }
 }
 
-/* ------------------------------------------------------------------ Hourly allowance */
-/* Quiet by design: there when you look for it, not something to think about. */
-.usage {
-  margin: 0;
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--practicex-cloud);
-  line-height: 1.3;
-  text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-.usage.low { color: var(--practicex-mist); }
-.usage.out { color: var(--practicex-peach); }
 
 /* ------------------------------------------------------------------ Classes */
 .chips.classes button.on {
@@ -814,13 +797,6 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
 }
 .chips.classes button.add { border-style: dashed; color: var(--practicex-mist); }
 .chips.classes button.add:hover { color: var(--practicex-fog); }
-.chips.classes button .x {
-  margin-left: 7px;
-  margin-right: -3px;
-  opacity: 0.6;
-  font-family: var(--practicex-font-mono);
-}
-.chips.classes button .x:hover { opacity: 1; }
 .chips.classes button.arm { background: var(--practicex-coral); color: var(--practicex-slate); border-color: transparent; }
 .add-class { display: flex; flex-direction: column; gap: 6px; }
 .add-class-row { display: flex; gap: 6px; align-items: center; }
@@ -1330,8 +1306,6 @@ body.focus .nav-bar { margin-left: 0; margin-right: 0; padding-left: 0; padding-
 
 /* A side panel dragged to its narrowest still has to fit "DIFFICULTY  Very hard" on one line. */
 @media (max-width: 400px) {
-  /* "this hour" is the first thing to go; the tooltip still says it in full. */
-  .usage-tail { display: none; }
   .wordmark { font-size: 17px; }
 }
 @media (max-width: 380px) {
@@ -1463,3 +1437,349 @@ body {
 #view-start .set-meta, #view-start .set-score { font-family: var(--practicex-font-ui); }
 #view-start .set-row { border-left-width: 2px; }
 #view-start .steps-list li { font-family: var(--practicex-font-ui); font-size: 13px; }
+
+/* ------------------------------------------------------------------ Start screen: the small text */
+/* The labels, links, values and tick marks were a mix of sizes, weights and two leftover faces (the
+   tick numbers were still the mono, two lines used the cloud grey the brand keeps off text, and the
+   links had capital-letter tracking on lowercase). One scale for all of it: small-cap labels in the
+   sans, links as plain words, and every value in the headline's serif so it ties to the greeting. */
+
+/* Labels: one size, one weight, one tracking. */
+#view-start .label,
+#view-start .cs-key,
+#view-start .eyebrow {
+  font-family: var(--practicex-font-ui);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #f2b393;
+}
+
+/* Links read as words you can tap, not as labels. */
+#view-start .link,
+#view-start .link.mono {
+  font-family: var(--practicex-font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #f2b393;
+  text-underline-offset: 3px;
+}
+#view-start .link:hover { color: var(--practicex-peach); text-decoration: underline; }
+
+/* The two settings: the word in a confident sans, the value in the headline's serif. */
+#view-start .picker-key { font-size: 13px; font-weight: 600; color: var(--practicex-fog); }
+#view-start .picker.on .picker-key { color: var(--practicex-peach); }
+#view-start .picker .count-readout,
+#view-start .picker .diff-readout {
+  font-family: var(--practicex-font-display);
+  font-weight: 600;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+#view-start .picker .count-readout { font-size: 18px; }
+#view-start .picker .diff-readout { font-size: 15px; }
+#view-start .picker-val { height: 22px; }
+
+/* Under the sliders: real numerals and words, readable rather than ghosted. */
+#view-start .count-ticks span {
+  font-family: var(--practicex-font-ui);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(143, 160, 180, 0.55);
+}
+#view-start .count-ticks span.on { color: var(--practicex-mist); }
+#view-start .count-ticks span.current { color: var(--practicex-coral); font-weight: 700; }
+#view-start .diff-ticks span {
+  font-family: var(--practicex-font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--practicex-mist);
+}
+#view-start .diff-ticks span.current { color: var(--dcolor); }
+
+#view-start .slider-tip { font-size: 11.5px; color: var(--practicex-mist); }
+#view-start .slider-tip b { color: var(--practicex-fog); }
+#view-start .hint { font-family: var(--practicex-font-ui); font-size: 12.5px; color: var(--practicex-mist); }
+
+/* The value under Explanation matches the values above it. */
+#view-start .cs-val {
+  font-family: var(--practicex-font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--practicex-bone);
+}
+
+#view-start .chips button { font-weight: 500; }
+
+/* ------------------------------------------------------------------ Background color setting */
+/* Settings > Background: eight dark presets and a custom picker. Classic is the brand slate and
+   adds nothing. Any other pick sets --practicex-slate and puts .themed on <html>, and the surfaces
+   that were written as fixed shades of the slate blue are derived from the chosen color instead,
+   so a Forest panel gets green cards and borders rather than blue ones. */
+.swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  font-family: var(--practicex-font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--practicex-mist);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.swatch:hover { background: rgba(255, 255, 255, 0.07); color: var(--practicex-fog); }
+.swatch.on { outline-color: var(--practicex-coral); color: var(--practicex-bone); }
+.swatch:focus-within, .swatch:focus-visible { outline-color: var(--practicex-fog); }
+.swatch > span {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.22);
+}
+.swatch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; padding: 0; border: 0; cursor: pointer; }
+#bg-reset:disabled { opacity: 0.35; cursor: default; }
+
+html.themed {
+  --practicex-slate-raised: color-mix(in srgb, var(--practicex-slate), white 6%);
+  --practicex-slate-line: color-mix(in srgb, var(--practicex-slate), white 16%);
+  --grad-card: linear-gradient(160deg, color-mix(in srgb, var(--practicex-slate), white 9%) 0%, color-mix(in srgb, var(--practicex-slate), white 5%) 100%);
+  --grad-edge: linear-gradient(135deg, rgba(255, 122, 77, 0.65), rgba(255, 217, 194, 0.2) 45%, color-mix(in srgb, var(--practicex-slate), white 30%));
+}
+html.themed body {
+  background:
+    radial-gradient(110% 50% at 0% 0%, rgba(255, 122, 77, 0.2), transparent 62%),
+    radial-gradient(70% 38% at 100% 18%, rgba(255, 217, 194, 0.07), transparent 70%),
+    radial-gradient(90% 45% at 100% 100%, color-mix(in srgb, var(--practicex-slate), white 14%), transparent 65%),
+    var(--practicex-slate);
+  background-attachment: fixed;
+}
+html.themed .wedge {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--practicex-slate), white 16%), color-mix(in srgb, var(--practicex-slate), white 26%));
+}
+html.themed .crop-box { box-shadow: 0 0 0 9999px color-mix(in srgb, var(--practicex-slate) 62%, transparent); }
+html.themed .nav-bar { background: linear-gradient(to top, var(--practicex-slate) 72%, color-mix(in srgb, var(--practicex-slate) 0%, transparent)); }
+html.themed .help-card {
+  background: var(--grad-card) padding-box,
+    linear-gradient(120deg, rgba(255, 217, 194, 0.45), color-mix(in srgb, var(--practicex-slate), white 28%), rgba(255, 122, 77, 0.35)) border-box;
+}
+/* Three more surfaces that had the slate blue written in: the bottom bar's buttons, the
+   multiple-choice options, and the end of the rule above Explanation. */
+html.themed .nav-btn {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, color-mix(in srgb, var(--practicex-slate), white 9%) 90%, transparent),
+    color-mix(in srgb, color-mix(in srgb, var(--practicex-slate), white 5%) 90%, transparent));
+}
+html.themed .option {
+  background: linear-gradient(160deg,
+    color-mix(in srgb, color-mix(in srgb, var(--practicex-slate), white 9%) 75%, transparent),
+    color-mix(in srgb, color-mix(in srgb, var(--practicex-slate), white 5%) 75%, transparent));
+}
+html.themed .current-settings {
+  background: linear-gradient(90deg, rgba(255, 122, 77, 0.55), rgba(255, 217, 194, 0.18) 45%,
+    color-mix(in srgb, color-mix(in srgb, var(--practicex-slate), white 16%) 60%, transparent)) top / 100% 1px no-repeat;
+}
+html.themed .segmented button[aria-checked="true"] {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--practicex-slate), white 14%), color-mix(in srgb, var(--practicex-slate), white 9%));
+}
+
+/* ------------------------------------------------------------------ Picker values: centering and the end-of-scale pill */
+/* Literata's figures and lowercase sit about 1.25px below the middle of their line box, so a value
+   looked low next to its sans label (which is centered to within 0.03px). `translate` lifts it onto
+   the optical center without touching the pop animation, which runs on `transform`. */
+#view-start .picker .count-readout,
+#view-start .picker .diff-readout { translate: 0 -1.25px; }
+/* Pushing the slider to an end still earns the colored pill, just at a size that suits the button.
+   The pill itself stays centered; the uneven padding centers the low-sitting serif text inside it. */
+#view-start .picker .diff-readout.unlocked {
+  translate: none;
+  font-size: 12.5px;
+  line-height: 1;
+  padding: 1px 7px 3px;
+  letter-spacing: 0.01em;
+}
+/* The pill was the value's whole 22px box, which is why it looked oversized. The button now holds its
+   own height, so the pill can be its natural size without the row moving when it appears. */
+#view-start .picker { min-height: 40px; }
+#view-start .picker .diff-readout.unlocked { height: auto; padding: 1.4px 7px 3.6px; }
+
+/* ------------------------------------------------------------------ Section headings and their links */
+/* "Class" sat in the same small tracked caps as the day line right above it, so the two stacked up
+   as two labels, and "Edit" floated beside it as loose text. Section headings now take the
+   headline's serif at a small size, and the link beside each one is a small outlined pill, so it
+   reads as a button. Recent practice follows, so the two sections match. */
+#view-start #class-field .row-label > .label,
+#view-start #recent .row-label > .label {
+  font-family: var(--practicex-font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--practicex-bone);
+}
+#view-start #class-field .row-label,
+#view-start #recent .row-label { align-items: center; }
+#view-start #edit-classes,
+#view-start #recent-all {
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 184, 150, 0.35);
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: #f2b393;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+#view-start #edit-classes:hover,
+#view-start #recent-all:hover {
+  text-decoration: none;
+  color: var(--practicex-peach);
+  border-color: var(--practicex-coral);
+  background: rgba(255, 122, 77, 0.12);
+}
+
+/* ------------------------------------------------------------------ Recent sets read as things to open */
+/* The set name was the same flat sans as the details under it. It now takes the serif like every
+   other value on the screen, each row ends in a chevron, and hovering lifts the row, warms the name
+   and nudges the chevron, so a set looks like something you can open. */
+.set-topic {
+  font-family: var(--practicex-font-display);
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--practicex-bone);
+  transition: color 0.15s ease;
+}
+#view-start .set-topic { font-family: var(--practicex-font-display); font-size: 15.5px; }
+.set-row { cursor: pointer; }
+.set-row::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin: 0 3px 0 2px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  rotate: 45deg;
+  color: rgba(242, 179, 147, 0.7);
+  transition: translate 0.18s ease, color 0.18s ease;
+}
+.set-row:hover {
+  border-color: rgba(255, 122, 77, 0.55);
+  background: linear-gradient(90deg, rgba(255, 122, 77, 0.13), rgba(255, 255, 255, 0.035) 55%);
+}
+.set-row:hover .set-topic { color: var(--practicex-peach); }
+.set-row:hover::after { translate: 3px 0; color: var(--practicex-coral); }
+
+/* ------------------------------------------------------------------ Class chips in edit mode */
+/* Edit used to append a mono "x" to each name: a second font on its own baseline, and enough extra
+   width to wrap a two-word class onto two lines and double the chip's height. Names never wrap now,
+   the remove mark is a small round icon centered beside the name, and a chip is the same height in
+   both modes, so tapping Edit moves nothing. */
+.chips.classes button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  line-height: 1.25;
+}
+.chips.classes button .chip-x {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 0.8;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+.chips.classes button.on .chip-x { background: rgba(30, 42, 56, 0.14); }
+.chips.classes button:hover .chip-x { opacity: 1; background: rgba(255, 122, 77, 0.28); }
+.chips.classes button .chip-x svg { display: block; }
+
+/* ------------------------------------------------------------------ Home link and the colored Back */
+/* The logo and the name are one button home. It keeps the header's exact spacing, so nothing moves,
+   and on hover the name warms and the logo lifts a little. */
+.home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 2px 6px 2px 2px;
+  margin: -2px -6px -2px -2px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.home-link .mark { transition: transform 0.2s var(--pop); }
+.home-link .wordmark { transition: color 0.15s ease; }
+.home-link:hover .mark { transform: scale(1.06) rotate(-4deg); }
+.home-link:hover .wordmark { color: #fff7f1; }
+.home-link:focus-visible { outline: 2px solid var(--practicex-fog); outline-offset: 2px; }
+
+/* Back on the progress page was a grey secondary button; it is the way home, so it carries the coral. */
+.back-btn { display: inline-flex; align-items: center; gap: 6px; padding-left: 14px; }
+.back-btn svg { flex: 0 0 auto; margin-left: -2px; }
+
+/* ------------------------------------------------------------------ This week */
+/* Fills whatever room recent practice leaves at the bottom of the start screen, so it ends at the
+   panel's edge instead of on empty space. Shown only when it fits. */
+.week {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 2px;
+}
+.week-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: calc(6px + var(--week-extra, 0px) / 2) 6px calc(5px + var(--week-extra, 0px) / 2);
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--practicex-slate-line);
+  font-family: var(--practicex-font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--practicex-mist);
+  text-align: center;
+}
+.week-cell b {
+  font-family: var(--practicex-font-display);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--practicex-bone);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* ------------------------------------------------------------------ Header tools in light blue */
+/* Progress and Settings were the same grey as secondary text and disappeared into the header. They
+   take a light sky blue, the one cool color on the screen against all the coral, with a soft
+   matching disc on hover. */
+.head-tools .icon-btn {
+  color: #8fd0ff;
+  border-radius: 9px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.head-tools .icon-btn:hover {
+  color: #c4e7ff;
+  background: rgba(143, 208, 255, 0.14);
+}
+.head-tools .icon-btn[aria-pressed="true"],
+.head-tools .icon-btn.on { color: #c4e7ff; background: rgba(143, 208, 255, 0.18); }

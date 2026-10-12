@@ -18,6 +18,7 @@ const load = (path) =>
     s.onerror = reject;
     document.head.append(s);
   });
+await load(`theme-boot.js?v=${V}`); // panel.html runs this first, before anything is drawn
 await load(`mathjax-config.js?v=${V}`);
 await load("vendor/mathjax/tex-svg-full.js");
 await import(`/extension/panel.js?v=${V}`);

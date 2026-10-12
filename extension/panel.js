@@ -85,6 +85,7 @@ async function loadStorage() {
   settings = { ...settings, ...(local.settings || {}) };
   if (!DEV) settings.serverUrl = DEFAULT_SERVER;
   prefs = { ...prefs, ...(local.prefs || {}) };
+  applyBg(currentBg());
   // The slider used to set the answer format too. An install left on that setting heals to Problems.
   if (!SLIDERS.includes(prefs.slider)) prefs.slider = "count";
   const session = await chrome.storage.session.get("state");
@@ -113,6 +114,103 @@ function save() {
 
 function savePrefs() {
   chrome.storage.local.set({ prefs });
+}
+
+// ---------------------------------------------------------------- background color
+
+// Every preset is dark enough for the panel's light text. Classic is the brand slate and is the only
+// one that leaves the stylesheet alone; the rest set the color and let the CSS derive the lighter
+// surfaces (cards, borders, the slider track) from it.
+const DEFAULT_BG = "#1e2a38";
+const BG_PRESETS = [
+  ["Classic", DEFAULT_BG],
+  ["Midnight", "#171c2b"],
+  ["Ocean", "#13303a"],
+  ["Forest", "#1c2a22"],
+  ["Plum", "#2a2033"],
+  ["Wine", "#321e28"],
+  ["Graphite", "#26282c"],
+  ["Black", "#121212"],
+];
+
+// A custom pick is darkened until the panel's dimmest text (the small grey) and the coral accent both
+// keep a 4.5:1 contrast on it, measured the WCAG way. A plain weighted average undercounts how bright
+// pure red is and let it through at about 4.1:1.
+const CONTRAST_TEXT = ["#8fa0b4", "#ff7a4d"];
+
+function luminance([r, g, b]) {
+  const lin = (c) => ((c /= 255) <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+function hexRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+}
+
+function darkenForText(hex) {
+  let rgb = hexRgb(hex);
+  const ceiling = Math.min(...CONTRAST_TEXT.map((t) => (luminance(hexRgb(t)) + 0.05) / 4.5 - 0.05));
+  for (let i = 0; i < 80 && luminance(rgb) > ceiling; i++) rgb = rgb.map((c) => Math.floor(c * 0.96));
+  return `#${((1 << 24) | (rgb[0] << 16) | (rgb[1] << 8) | rgb[2]).toString(16).slice(1)}`;
+}
+
+function currentBg() {
+  const c = String(prefs.bg || DEFAULT_BG).toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(c) ? c : DEFAULT_BG;
+}
+
+function applyBg(color) {
+  const root = document.documentElement;
+  const classic = color === DEFAULT_BG;
+  root.classList.toggle("themed", !classic);
+  if (classic) root.style.removeProperty("--practicex-slate");
+  else root.style.setProperty("--practicex-slate", color);
+  try {
+    localStorage.setItem("px-bg", color); // read by theme-boot.js before the next open draws anything
+  } catch {}
+}
+
+function pickBg(color) {
+  prefs.bg = color;
+  savePrefs();
+  applyBg(color);
+  renderBgSwatches();
+}
+
+function renderBgSwatches() {
+  const bg = currentBg();
+  const box = $("bg-swatches");
+  const custom = !BG_PRESETS.some(([, c]) => c === bg);
+  box.replaceChildren(
+    ...BG_PRESETS.map(([name, color]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `swatch${bg === color ? " on" : ""}`;
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-checked", String(bg === color));
+      const dot = document.createElement("span");
+      dot.style.background = color;
+      b.append(dot, name);
+      b.addEventListener("click", () => pickBg(color));
+      return b;
+    }),
+  );
+  const label = document.createElement("label");
+  label.className = `swatch${custom ? " on" : ""}`;
+  const dot = document.createElement("span");
+  dot.style.background = custom ? bg : "conic-gradient(#ff5f5f, #ffd166, #6be38a, #4cc9f0, #7a6cff, #ff6ad5, #ff5f5f)";
+  const input = document.createElement("input");
+  input.type = "color";
+  input.value = bg;
+  input.setAttribute("aria-label", "Custom background color");
+  // Applied as you drag around the picker, saved once you let go.
+  input.addEventListener("input", (e) => applyBg(darkenForText(e.target.value)));
+  input.addEventListener("change", (e) => pickBg(darkenForText(e.target.value)));
+  dot.append(input);
+  label.append(dot, "Custom");
+  box.append(label);
+  $("bg-reset").disabled = bg === DEFAULT_BG;
 }
 
 function watchStorage() {
@@ -248,33 +346,17 @@ function questionsLeft() {
 
 // The hourly allowance, in one quiet line under the header. It says enough to explain itself
 // and stays out of the way until it runs low.
+// The hourly allowance is not shown anywhere on screen. It only matters at zero: everything that
+// would spend a question is disabled rather than failing on the server, Screenshot says why, and
+// its tooltip says when the count comes back.
 function renderUsage() {
   const usage = config?.usage;
-  const box = $("usage");
   const left = questionsLeft();
-  if (left === null) {
-    box.hidden = true;
-    return;
-  }
-  box.hidden = false;
   const out = left === 0;
-  box.classList.toggle("out", out);
-  box.classList.toggle("low", !out && left <= Math.max(3, Math.round(usage.limit * 0.05)));
-  const resets = usage.resets_at ? formatTime(usage.resets_at) : "";
-  // It shares the header row with the wordmark and the two tools, so it is said short, and the tail
-  // drops entirely on a narrow panel. The full sentence, cap and reset time are on the tooltip.
-  if (out && resets) {
-    $("usage-main").textContent = `None left until ${resets}`;
-    $("usage-tail").textContent = "";
-  } else {
-    $("usage-main").textContent = out ? "None left" : `${left} left`;
-    $("usage-tail").textContent = " this hour";
-  }
-  box.title = `${left} of ${usage.limit} questions this hour.${resets ? ` The count resets at ${resets}.` : ""}`;
-  // Everything that would spend a question says so rather than failing on the server.
-  const spenders = [$("generate"), $("new-set")];
-  for (const b of spenders) b.disabled = out;
+  const resets = out && usage?.resets_at ? formatTime(usage.resets_at) : "";
+  for (const b of [$("generate"), $("new-set")]) b.disabled = out;
   $("generate").textContent = out ? "Limit reached" : "Screenshot";
+  $("generate").title = out ? (resets ? `Back at ${resets}` : "Back within the hour") : "";
 }
 
 // Runs fn at most once every `ms` while triggered; cancel() drops a pending run.
@@ -711,6 +793,14 @@ function startOver() {
   renderStart();
 }
 
+// The logo and name in the header go home from anywhere: a problem, the crop, progress, Settings.
+// Same as Start over, so the set on screen stays in history and can be reopened.
+function goHome() {
+  if (state.view === "start") return;
+  startOver();
+  window.scrollTo({ top: 0 });
+}
+
 function renderModels() {
   const select = $("model");
   select.replaceChildren();
@@ -742,6 +832,11 @@ function renderStart(opts) {
   renderClasses();
   renderRecent();
   show("start", opts);
+  fitRecent();
+  // Row heights settle only once the panel has drawn and the web fonts have arrived, and the first
+  // measurement can come too early; measure again at both points.
+  requestAnimationFrame(fitRecent);
+  document.fonts?.ready.then(fitRecent);
 }
 
 // The browser window this side panel is docked in, which is the one whose tab gets photographed.
@@ -1684,13 +1779,19 @@ function classChip(course) {
   const on = (prefs.courseId || "") === course.id;
   b.classList.toggle("on", on);
   b.setAttribute("aria-checked", String(on));
-  b.append(course.name);
+  // The name and the remove mark are separate pieces, so the mark sits beside the name on its
+  // centre line instead of being a stray letter in another font.
+  const name = document.createElement("span");
+  name.className = "chip-name";
+  name.textContent = course.name;
+  b.append(name);
   const editing = Boolean($("classes").dataset.editing) && course.id;
   if (editing) {
     const x = document.createElement("span");
-    x.className = "x";
-    x.textContent = "x";
+    x.className = "chip-x";
     x.setAttribute("aria-hidden", "true");
+    x.innerHTML =
+      '<svg viewBox="0 0 10 10" width="8" height="8"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
     b.append(x);
     b.title = `Remove ${course.name}`;
   }
@@ -1704,6 +1805,8 @@ function classChip(course) {
     // Two taps to remove, so one stray click cannot delete a class.
     if (b.dataset.armed) return removeClass(course.id);
     b.dataset.armed = "1";
+    // Keep the chip's width while it asks, so the chips beside it do not jump.
+    b.style.minWidth = `${b.getBoundingClientRect().width}px`;
     b.classList.add("arm");
     b.replaceChildren("Remove?");
     setTimeout(() => {
@@ -1868,7 +1971,8 @@ function setRow(h, nested = false) {
   const meta = document.createElement("span");
   meta.className = "set-meta mono";
   const band = difficultyBand(difficultyLevel(h.difficulty));
-  const level = band[1] === "Medium" ? "" : band[1];
+  // The middle of the scale is the default, so only a set made easier or harder says its level.
+  const level = band[1] === "Same" ? "" : band[1];
   meta.textContent = nested
     ? level
     : [formatWhen(h.updated), folderOf(h).name, level].filter(Boolean).join(" · ");
@@ -1886,13 +1990,57 @@ function setRow(h, nested = false) {
   return li;
 }
 
+// The start screen should end where the panel does. Recent practice shows as many sets as fit
+// (at least 3, at most 6), then a slim summary of the week if it fits, which grows a little to take
+// up whatever is left. Run after the start screen is on screen, since it measures.
+const RECENT_MIN = 3;
+const RECENT_MAX = 6;
+
+function fitRecent() {
+  if (state.view !== "start" || !history.length) return;
+  const list = $("recent-sets");
+  const week = $("week");
+  const room = () => window.innerHeight - parseFloat(getComputedStyle(document.querySelector(".panel")).paddingBottom) - $("recent").getBoundingClientRect().bottom;
+  week.hidden = true;
+  let n = Math.min(history.length, RECENT_MIN);
+  list.replaceChildren(...history.slice(0, n).map((h) => setRow(h)));
+  while (n < Math.min(history.length, RECENT_MAX)) {
+    const row = setRow(history[n]);
+    list.append(row);
+    if (room() < 0) {
+      row.remove();
+      break;
+    }
+    n++;
+  }
+  // The week summary goes in whenever it fits, and any space still left (less than another row)
+  // is taken up by its tiles growing a little taller, so the screen ends at the panel's edge.
+  renderWeek();
+  week.style.removeProperty("--week-extra");
+  week.hidden = false;
+  if (room() < 0) week.hidden = true;
+  else week.style.setProperty("--week-extra", `${Math.min(40, Math.floor(room()))}px`);
+}
+
+function renderWeek() {
+  const since = Date.now() - 7 * 864e5;
+  const recent = history.filter((h) => (h.updated || h.at || 0) >= since);
+  $("week-sets").textContent = recent.length;
+  $("week-solved").textContent = recent.reduce((sum, h) => sum + setScore(h).correct, 0);
+  $("week-streak").textContent = streak();
+}
+
 function renderRecent() {
   const empty = history.length === 0;
   $("recent").hidden = empty;
   // Nothing to look back on yet, so the room under the button explains the thing instead of
   // sitting blank.
   $("first-run").hidden = !empty;
+  // The hint about the two setting buttons is for a first look only; once a set has been made the
+  // student knows how the buttons work, and the line goes for good.
+  $("slider-tip").hidden = !empty;
   $("recent-sets").replaceChildren(...history.slice(0, 3).map((h) => setRow(h)));
+  fitRecent(); // only acts when the start screen is the one showing
 }
 
 // Every set belongs to exactly one folder: the class it was generated under, or its subject.
@@ -2164,6 +2312,7 @@ function openSettings() {
   if (state.view !== "settings") viewBeforeSettings = state.view;
   setRich($("size-sample"), String.raw`Solve \(2x^2 - 7x + 3 = 0\) by factoring, then check both roots.`);
   renderVerbosity();
+  renderBgSwatches();
   show("settings");
 }
 
@@ -2255,7 +2404,10 @@ function bind() {
   window.addEventListener("resize", () => {
     applyWindowSize();
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => fitInlineMath(document.body), 150);
+    resizeTimer = setTimeout(() => {
+      fitInlineMath(document.body);
+      fitRecent();
+    }, 150);
   });
   $("verbosity").addEventListener("click", (e) => {
     const value = e.target.closest("button")?.dataset.value;
@@ -2315,11 +2467,13 @@ function bind() {
   $("cancel-class").addEventListener("click", () => openAddClass(false));
   $("open-history").addEventListener("click", () => (state.view === "history" ? closeHistory() : openHistory()));
   $("history-back").addEventListener("click", closeHistory);
+  $("go-home").addEventListener("click", goHome);
   $("recent-all").addEventListener("click", openHistory);
   $("clear-history").addEventListener("click", clearHistory);
   window.addEventListener("pagehide", flushHistory);
   $("prereq-back").addEventListener("click", () => renderProblem());
 
+  $("bg-reset").addEventListener("click", () => pickBg(DEFAULT_BG));
   $("open-settings").addEventListener("click", () => (state.view === "settings" ? closeSettings() : openSettings()));
   $("save-settings").addEventListener("click", saveSettings);
 }
