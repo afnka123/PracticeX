@@ -20,7 +20,7 @@ services:
       - key: HOURLY_CAP
         value: "200"
       - key: GLOBAL_HOURLY_CAP
-        value: "3000"
+        value: "15000"
       - key: OPENAI_API_KEY
         sync: false
       - key: FOUNDER_TOKEN
