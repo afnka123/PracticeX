@@ -73,16 +73,16 @@ PracticeX generates new practice problems that resemble a question the user sele
 **Permission justifications**
 
 `storage`
-Saves the student's practice history, class list and settings (difficulty, text size, answer format) locally in chrome.storage.local so progress persists between sessions. Nothing in storage is sent to a server.
+Saves the student's practice history, class list and settings (number of problems, difficulty, text size, explanation level and background color) locally on their device, so progress and preferences persist between sessions. Nothing in storage is sent to a server.
 
 `sidePanel`
 PracticeX's interface runs in Chrome's side panel. Clicking the toolbar icon opens the panel beside the page the student is studying, so they can screenshot a question on that page and work through the practice problems while the page stays visible. The panel stays open when they switch tabs. The sidePanel API is used only to register the panel page and open it when the toolbar icon is clicked (`sidePanel.setOptions` and `sidePanel.setPanelBehavior`). It reads no page content or browsing data.
 
 `optional_host_permissions: <all_urls>` (host permission)
-Required by chrome.tabs.captureVisibleTab to screenshot the tab the student is looking at, which is the only way PracticeX can read the question. It is an optional permission requested on the first click of Generate, not at install. PracticeX does not inject content scripts, read or modify page DOM, or run on any page in the background. The student then crops the screenshot to the question, and only the cropped region leaves the browser.
+Required by chrome.tabs.captureVisibleTab to screenshot the tab the student is looking at, which is the only way PracticeX can read the question. It is an optional permission requested the first time the student clicks Screenshot, not at install. PracticeX does not inject content scripts, read or modify page content, or run on any page in the background. The student crops the screenshot to the question, and only the cropped region leaves the browser.
 
 **Are you using remote code?**
-No. All JavaScript, including MathJax, is bundled in the extension package. The extension makes fetch requests to its own API for data only.
+No. All JavaScript, including MathJax, is bundled in the extension package. The extension fetches data from its own server and loads web fonts from Google Fonts; neither includes executable code.
 
 **Data usage — check these boxes:**
 
@@ -93,9 +93,9 @@ Which of the following does your item collect?
 - [ ] Authentication information
 - [ ] Personal communications
 - [ ] Location
-- [x] Web history — NO, leave unchecked (see note)
-- [x] User activity — CHECK THIS: typed answers are sent for checking; problems the user reports are stored
-- [x] Website content — CHECK THIS: the screenshot region the user selects is sent to generate problems
+- [ ] Web history: leave unchecked (see note)
+- [x] User activity: typed answers are sent for checking; problems the user reports are stored
+- [x] Website content: the screenshot region the user selects is sent to generate problems
 
   Note: Do NOT check "Web history". PracticeX does not record URLs or pages visited. The screenshot is an image of user-selected content, which falls under "Website content".
 
