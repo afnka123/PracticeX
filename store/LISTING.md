@@ -75,6 +75,9 @@ PracticeX generates new practice problems that resemble a question the user sele
 `storage`
 Saves the student's practice history, class list and settings (difficulty, text size, answer format) locally in chrome.storage.local so progress persists between sessions. Nothing in storage is sent to a server.
 
+`sidePanel`
+PracticeX's interface runs in Chrome's side panel. Clicking the toolbar icon opens the panel beside the page the student is studying, so they can screenshot a question on that page and work through the practice problems while the page stays visible. The panel stays open when they switch tabs. The sidePanel API is used only to register the panel page and open it when the toolbar icon is clicked (`sidePanel.setOptions` and `sidePanel.setPanelBehavior`). It reads no page content or browsing data.
+
 `optional_host_permissions: <all_urls>` (host permission)
 Required by chrome.tabs.captureVisibleTab to screenshot the tab the student is looking at, which is the only way PracticeX can read the question. It is an optional permission requested on the first click of Generate, not at install. PracticeX does not inject content scripts, read or modify page DOM, or run on any page in the background. The student then crops the screenshot to the question, and only the cropped region leaves the browser.
 
